@@ -1,4 +1,4 @@
-
+from fastapi.responses import FileResponse
 import os
 import hmac
 import hashlib
@@ -76,10 +76,7 @@ def verify_telegram_data(init_data: str):
 
 @app.get("/")
 def home():
-    return {
-        "status": "online",
-        "message": "Game server is working!"
-    }
+    return FileResponse("static/index.html")
 
 
 @app.get("/health")
