@@ -1,0 +1,91 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Моя игра</title>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 25px;
+            background: #171923;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 400px;
+            margin: 60px auto;
+            padding: 25px;
+            background: #252a3a;
+            border-radius: 16px;
+        }
+
+        h1 {
+            font-size: 28px;
+        }
+
+        #status {
+            color: #aab2c5;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Моя игра</h1>
+        <p id="player">Загрузка игрока...</p>
+        <p id="status">Подключение...</p>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+
+        tg.ready();
+        tg.expand();
+
+        const player = document.getElementById("player");
+        const status = document.getElementById("status");
+
+        async function startGame() {
+            if (!tg.initData) {
+                status.textContent = "Открой игру через Telegram";
+                return;
+            }
+
+            try {
+                const response = await fetch("/auth/telegram", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        init_data: tg.initData
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || "Ошибка авторизации");
+                }
+
+                player.textContent =
+                    "Привет, " + (tg.initDataUnsafe.user.first_name || "игрок") + "!";
+
+                status.textContent = "Ты успешно вошёл в игру!";
+            } catch (error) {
+                status.textContent = "Ошибка: " + error.message;
+            }
+        }
+
+        startGame();
+    </script>
+</body>
+</html>
