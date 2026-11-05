@@ -474,3 +474,43 @@ def fish_finish(req: AnswerRequest):
         "message": message,
         "inventory": load_inventory(tid),
                 }
+from fastapi.responses import FileResponse  # noqa: E402
+
+
+class DeleteRequest(BaseModel):
+    init_data: str
+    inv_id: int
+
+
+@router.post("/inventory/delete")
+@safe
+def inventory_delete(req: DeleteRequest):
+    tid = verify_telegram_data(req.init_data)["id"]
+    r = (
+        supabase.table("inventory")
+        .select("id,equipped")
+        .eq("id", req.inv_id)
+        .eq("telegram_id", tid)
+        .limit(1)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, "Предмет не найден")
+    if r.data[0]["equipped"]:
+        raise HTTPException(400, "Сначала сними предмет")
+
+    supabase.table("inventory").delete().eq(
+        "id", req.inv_id
+    ).eq("telegram_id", tid).execute()
+    return {"message": "Предмет удалён", "inventory": load_inventory(tid)}
+
+
+@router.get("/js/{name}")
+def js_file(name: str):
+    if name not in ("ui.js", "world.js"):
+        raise HTTPException(404, "Not found")
+    return FileResponse(
+        "static/" + name,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
