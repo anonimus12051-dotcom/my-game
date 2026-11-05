@@ -1,91 +1,128 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Моя игра</title>
-
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
-    <style>
-        body {
-            margin: 0;
-            padding: 25px;
-            background: #171923;
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-        }
-
-        .container {
-            max-width: 400px;
-            margin: 60px auto;
-            padding: 25px;
-            background: #252a3a;
-            border-radius: 16px;
-        }
-
-        h1 {
-            font-size: 28px;
-        }
-
-        #status {
-            color: #aab2c5;
-            margin-top: 20px;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Моя игра</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { margin:0; padding:16px; font-family:sans-serif;
+         background:#1b1b24; color:#eee; }
+  .card { background:#272735; border-radius:12px; padding:14px; margin-bottom:12px; }
+  .head { display:flex; align-items:center; gap:12px; }
+  #avatar { width:64px; height:64px; border-radius:50%; background:#444; object-fit:cover; }
+  .bar { height:14px; background:#111; border-radius:7px; overflow:hidden; margin:4px 0 10px; }
+  .fill { height:100%; }
+  #hpFill { background:#d64545; }
+  #xpFill { background:#4a90e2; }
+  .classes { display:flex; gap:8px; }
+  .classes button { flex:1; padding:10px 4px; border:2px solid #444;
+         background:#1b1b24; color:#eee; border-radius:8px; font-size:14px; }
+  .classes button.active { border-color:#f5c542; color:#f5c542; }
+  .slots { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .slot { aspect-ratio:1; background:#1b1b24; border:1px dashed #555;
+         border-radius:8px; display:flex; align-items:center;
+         justify-content:center; font-size:11px; color:#888; text-align:center; }
+  #status { color:#aaa; font-size:13px; }
+</style>
 </head>
-
 <body>
-    <div class="container">
-        <h1>Моя игра</h1>
-        <p id="player">Загрузка игрока...</p>
-        <p id="status">Подключение...</p>
+  <div class="card head">
+    <img id="avatar" alt="">
+    <div>
+      <div id="name" style="font-size:18px;font-weight:bold">...</div>
+      <div id="silver">Серебро: 0</div>
     </div>
+  </div>
 
-    <script>
-        const tg = window.Telegram.WebApp;
+  <div class="card">
+    <div id="levelText">Уровень 1</div>
+    <div>HP: <span id="hpText"></span></div>
+    <div class="bar"><div class="fill" id="hpFill"></div></div>
+    <div>Опыт: <span id="xpText"></span></div>
+    <div class="bar"><div class="fill" id="xpFill"></div></div>
+    <div>Очки прокачки: <span id="points">0</span></div>
+  </div>
 
-        tg.ready();
-        tg.expand();
+  <div class="card">
+    <div style="margin-bottom:8px">Класс</div>
+    <div class="classes">
+      <button data-c="fighter">Боец</button>
+      <button data-c="rogue">Плут</button>
+      <button data-c="gatherer">Сборщик</button>
+    </div>
+  </div>
 
-        const player = document.getElementById("player");
-        const status = document.getElementById("status");
+  <div class="card">
+    <div style="margin-bottom:8px">Экипировка</div>
+    <div class="slots" id="slots"></div>
+  </div>
 
-        async function startGame() {
-            if (!tg.initData) {
-                status.textContent = "Открой игру через Telegram";
-                return;
-            }
+  <div id="status">Загрузка...</div>
 
-            try {
-                const response = await fetch("/auth/telegram", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        init_data: tg.initData
-                    })
-                });
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
 
-                const data = await response.json();
+const status = document.getElementById("status");
 
-                if (!response.ok) {
-                    throw new Error(data.detail || "Ошибка авторизации");
-                }
+["Шлем","Нагрудник","Перчатки","Штаны","Ботинки","Амулет","Оружие"]
+  .forEach(n => {
+    const d = document.createElement("div");
+    d.className = "slot";
+    d.textContent = n;
+    document.getElementById("slots").appendChild(d);
+  });
 
-                player.textContent =
-                    "Привет, " + (tg.initDataUnsafe.user.first_name || "игрок") + "!";
+function show(p) {
+  document.getElementById("name").textContent = p.first_name || p.username || "Игрок";
+  document.getElementById("silver").textContent = "Серебро: " + p.balance;
+  document.getElementById("levelText").textContent = "Уровень " + p.level;
+  document.getElementById("hpText").textContent = p.hp + " / 100";
+  document.getElementById("hpFill").style.width = Math.min(100, p.hp) + "%";
+  document.getElementById("xpText").textContent = p.xp + " / " + p.xp_to_next;
+  document.getElementById("xpFill").style.width =
+      Math.min(100, p.xp / p.xp_to_next * 100) + "%";
+  document.getElementById("points").textContent = p.stat_points;
+  if (p.photo_url) document.getElementById("avatar").src = p.photo_url;
+  document.querySelectorAll(".classes button").forEach(b =>
+    b.classList.toggle("active", b.dataset.c === p.class));
+}
 
-                status.textContent = "Ты успешно вошёл в игру!";
-            } catch (error) {
-                status.textContent = "Ошибка: " + error.message;
-            }
-        }
+async function call(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error("Ошибка " + r.status);
+  return r.json();
+}
 
-        startGame();
-    </script>
+async function start() {
+  try {
+    const res = await call("/auth/telegram", {init_data: tg.initData});
+    show(res.player);
+    status.textContent = "";
+  } catch (e) {
+    status.textContent = "Не удалось войти: " + e.message;
+  }
+}
+
+document.querySelectorAll(".classes button").forEach(b => {
+  b.onclick = async () => {
+    try {
+      const res = await call("/profile/class",
+        {init_data: tg.initData, player_class: b.dataset.c});
+      show(res.player);
+    } catch (e) {
+      status.textContent = "Ошибка: " + e.message;
+    }
+  };
+});
+
+start();
+</script>
 </body>
 </html>
