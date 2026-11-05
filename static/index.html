@@ -6,11 +6,16 @@
 <title>Моя игра</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  body { margin:0; padding:16px; font-family:sans-serif;
+  body { margin:0; padding:12px; font-family:sans-serif;
          background:#1b1b24; color:#eee; }
   .card { background:#272735; border-radius:12px; padding:14px; margin-bottom:12px; }
-  .head { display:flex; align-items:center; gap:12px; }
-  #avatar { width:64px; height:64px; border-radius:50%; background:#444; object-fit:cover; }
+  .top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  #avatar { width:44px; height:44px; border-radius:50%; background:#444; object-fit:cover; }
+  .top .info { flex:1; }
+  #profileBtn { padding:10px 14px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; }
+  #world { display:block; width:100%; max-width:420px; margin:0 auto;
+         border-radius:12px; touch-action:none; }
   .bar { height:14px; background:#111; border-radius:7px; overflow:hidden; margin:4px 0 10px; }
   .fill { height:100%; }
   #hpFill { background:#d64545; }
@@ -33,76 +38,111 @@
          padding:10px 0; border-bottom:1px solid #333; gap:8px; }
   .row:last-child { border-bottom:none; }
   .row small { color:#aaa; }
-  .row button { padding:8px 14px; border:none; border-radius:8px;
+  .row button, .big { padding:8px 14px; border:none; border-radius:8px;
          background:#f5c542; color:#111; font-weight:bold; }
+  .big { display:block; width:100%; padding:14px; margin-bottom:10px; font-size:15px; }
   .uncommon { color:#6fd16f; }
   .hint { color:#888; font-size:12px; margin-top:6px; }
-  #status { color:#f5c542; font-size:14px; min-height:20px; }
-  .hidden { display:none; }
+  .hidden { display:none !important; }
+  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%);
+         background:#f5c542; color:#111; padding:8px 14px; border-radius:8px;
+         font-size:14px; z-index:100; max-width:90%; text-align:center; }
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.55);
+         z-index:50; display:flex; align-items:flex-end; }
+  #sheet { background:#272735; width:100%; max-height:82vh; overflow-y:auto;
+         border-radius:16px 16px 0 0; padding:14px; box-sizing:border-box; }
+  .sheetHead { display:flex; justify-content:space-between;
+         align-items:center; margin-bottom:12px; font-size:18px; }
+  #sheetClose { background:none; border:none; color:#eee; font-size:22px; }
+  .inner { background:#1b1b24; border-radius:12px; padding:12px; margin-bottom:12px; }
 </style>
 </head>
 <body>
-  <div class="card head">
+  <div class="top">
     <img id="avatar" alt="">
-    <div>
-      <div id="name" style="font-size:18px;font-weight:bold">...</div>
+    <div class="info">
+      <div id="name" style="font-weight:bold">...</div>
       <div id="silver">Серебро: 0</div>
     </div>
+    <button id="profileBtn">Профиль</button>
   </div>
 
-  <div class="tabs">
-    <button data-t="profile" class="active">Профиль</button>
-    <button data-t="shop">Магазин</button>
-    <button data-t="sell">Скупка</button>
-  </div>
+  <canvas id="world"></canvas>
+  <div id="toast" class="hidden"></div>
 
-  <div id="status">Загрузка...</div>
-
-  <div id="tab-profile">
-    <div class="card">
-      <div id="levelText">Уровень 1</div>
-      <div>HP: <span id="hpText"></span></div>
-      <div class="bar"><div class="fill" id="hpFill"></div></div>
-      <div>Опыт: <span id="xpText"></span></div>
-      <div class="bar"><div class="fill" id="xpFill"></div></div>
-      <div>Очки прокачки: <span id="points">0</span></div>
-    </div>
-
-    <div class="card">
-      <div style="margin-bottom:8px">Класс</div>
-      <div class="classes" style="margin-bottom:0">
-        <button data-c="fighter">Боец</button>
-        <button data-c="rogue">Плут</button>
-        <button data-c="gatherer">Сборщик</button>
+  <div id="overlay" class="hidden">
+    <div id="sheet">
+      <div class="sheetHead">
+        <b id="sheetTitle"></b>
+        <button id="sheetClose">✕</button>
       </div>
-    </div>
 
-    <div class="card">
-      <div style="margin-bottom:8px">Экипировка</div>
-      <div class="grid4" id="equip"></div>
-      <div class="hint">Нажми на надетый предмет, чтобы снять</div>
-    </div>
+      <div id="sec-profile" class="sec hidden">
+        <div class="inner">
+          <div id="levelText">Уровень 1</div>
+          <div>HP: <span id="hpText"></span></div>
+          <div class="bar"><div class="fill" id="hpFill"></div></div>
+          <div>Опыт: <span id="xpText"></span></div>
+          <div class="bar"><div class="fill" id="xpFill"></div></div>
+          <div>Очки прокачки: <span id="points">0</span></div>
+        </div>
+        <div class="inner">
+          <div style="margin-bottom:8px">Класс</div>
+          <div class="classes" style="margin-bottom:0">
+            <button data-c="fighter">Боец</button>
+            <button data-c="rogue">Плут</button>
+            <button data-c="gatherer">Сборщик</button>
+          </div>
+        </div>
+        <div class="inner">
+          <div style="margin-bottom:8px">Экипировка</div>
+          <div class="grid4" id="equip"></div>
+          <div class="hint">Нажми на надетый предмет, чтобы снять</div>
+        </div>
+        <div class="inner">
+          <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
+          <div class="grid5" id="inv"></div>
+          <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
+        </div>
+      </div>
 
-    <div class="card">
-      <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
-      <div class="grid5" id="inv"></div>
-      <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
-    </div>
-  </div>
+      <div id="sec-merchant" class="sec hidden">
+        <div class="tabs">
+          <button data-m="buy" class="active">Купить</button>
+          <button data-m="sell">Скупка</button>
+        </div>
+        <div id="m-buy">
+          <div class="cats">
+            <button data-cat="pvp" class="active">PvP</button>
+            <button data-cat="mine">Шахта</button>
+            <button data-cat="other">Остальное</button>
+          </div>
+          <div class="inner" id="shopList"></div>
+        </div>
+        <div id="m-sell" class="hidden">
+          <div class="inner">
+            <div style="margin-bottom:8px">Я покупаю дерево, рыбу и руду</div>
+            <div id="sellList"></div>
+          </div>
+        </div>
+      </div>
 
-  <div id="tab-shop" class="hidden">
-    <div class="cats">
-      <button data-cat="pvp" class="active">PvP</button>
-      <button data-cat="mine">Шахта</button>
-      <button data-cat="other">Остальное</button>
-    </div>
-    <div class="card" id="shopList"></div>
-  </div>
+      <div id="sec-auction" class="sec hidden">
+        <div class="inner">Аукцион скоро откроется. Здесь можно будет выставлять свои предметы и покупать у других игроков.</div>
+      </div>
 
-  <div id="tab-sell" class="hidden">
-    <div class="card">
-      <div style="margin-bottom:8px">NPC-скупщик покупает ресурсы</div>
-      <div id="sellList"></div>
+      <div id="sec-forge" class="sec hidden">
+        <div class="inner">Кузня временно закрыта. Позже здесь можно будет ремонтировать, улучшать и создавать предметы.</div>
+      </div>
+
+      <div id="sec-mine" class="sec hidden">
+        <div class="inner">Шахта пока закрыта. Скоро здесь можно будет добывать руду.</div>
+      </div>
+
+      <div id="sec-gates" class="sec hidden">
+        <button class="big" id="gBase">🏠 Построить базу</button>
+        <button class="big" id="gRtp">🎲 RTP — случайное путешествие</button>
+      </div>
     </div>
   </div>
 
@@ -111,7 +151,17 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-const status = document.getElementById("status");
+/* ---------- сообщения ---------- */
+const toastEl = document.getElementById("toast");
+let toastTimer;
+function setStatus(msg) {
+  clearTimeout(toastTimer);
+  toastEl.textContent = msg || "";
+  toastEl.classList.toggle("hidden", !msg);
+  if (msg) toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 3000);
+}
+
+/* ---------- данные игрока ---------- */
 const SLOTS = [
   ["helmet","Шлем"], ["chest","Нагрудник"], ["gloves","Перчатки"],
   ["pants","Штаны"], ["boots","Ботинки"], ["amulet","Амулет"],
@@ -122,8 +172,14 @@ let shopItems = [];
 let shopCat = "pvp";
 let inventory = [];
 
+const CLASS_COLORS = {fighter:"#d64545", rogue:"#7a4ad6", gatherer:"#3fae5a"};
+const me = {x:180, y:320, tx:null, ty:null, pending:null,
+            name:"Игрок", cls:"fighter"};
+
 function show(p) {
-  document.getElementById("name").textContent = p.first_name || p.username || "Игрок";
+  me.name = p.first_name || p.username || "Игрок";
+  me.cls = p.class;
+  document.getElementById("name").textContent = me.name;
   document.getElementById("silver").textContent = "Серебро: " + p.balance;
   document.getElementById("levelText").textContent = "Уровень " + p.level;
   document.getElementById("hpText").textContent = p.hp + " / 100";
@@ -163,7 +219,7 @@ function showInventory(list) {
       d.textContent = (row.equipped ? "✓ " : "") + row.items.name;
       d.onclick = () => {
         if (!row.items.slot) {
-          status.textContent = "Этот предмет нельзя надеть";
+          setStatus("Этот предмет нельзя надеть");
           return;
         }
         act(row.equipped ? "/inventory/unequip" : "/inventory/equip", row.id);
@@ -229,6 +285,7 @@ function showSell() {
   });
 }
 
+/* ---------- запросы к серверу ---------- */
 async function call(url, body) {
   const opts = body
     ? {method: "POST",
@@ -250,14 +307,14 @@ async function call(url, body) {
 function apply(res) {
   if (res.player) show(res.player);
   if (res.inventory) showInventory(res.inventory);
-  status.textContent = res.message || "";
+  setStatus(res.message || "");
 }
 
 async function act(url, invId) {
   try {
     apply(await call(url, {init_data: tg.initData, inv_id: invId}));
   } catch (e) {
-    status.textContent = e.message;
+    setStatus(e.message);
   }
 }
 
@@ -265,7 +322,7 @@ async function buy(itemId) {
   try {
     apply(await call("/shop/buy", {init_data: tg.initData, item_id: itemId}));
   } catch (e) {
-    status.textContent = e.message;
+    setStatus(e.message);
   }
 }
 
@@ -274,51 +331,23 @@ async function sell(invId) {
 }
 
 async function start() {
+  setStatus("Загрузка...");
   try {
     const res = await call("/auth/telegram", {init_data: tg.initData});
     apply(res);
-    status.textContent = "";
+    setStatus("");
     const shop = await call("/shop/items");
     shopItems = shop.items;
     showShop();
   } catch (e) {
-    status.textContent = "Не удалось войти: " + e.message;
+    setStatus("Не удалось войти: " + e.message);
   }
 }
 
-document.querySelectorAll(".classes button").forEach(b => {
-  b.onclick = async () => {
-    try {
-      const res = await call("/profile/class",
-        {init_data: tg.initData, player_class: b.dataset.c});
-      show(res.player);
-    } catch (e) {
-      status.textContent = e.message;
-    }
-  };
-});
+/* ---------- окна ---------- */
+const overlay = document.getElementById("overlay");
 
-document.querySelectorAll(".cats button").forEach(b => {
-  b.onclick = () => {
-    shopCat = b.dataset.cat;
-    document.querySelectorAll(".cats button").forEach(x =>
-      x.classList.toggle("active", x === b));
-    showShop();
-  };
-});
-
-document.querySelectorAll(".tabs button").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll(".tabs button").forEach(x =>
-      x.classList.toggle("active", x === b));
-    ["profile", "shop", "sell"].forEach(t =>
-      document.getElementById("tab-" + t)
-        .classList.toggle("hidden", t !== b.dataset.t));
-    status.textContent = "";
-  };
-});
-
-start();
-</script>
-</body>
-</html>
+function openSheet(sec, title) {
+  document.querySelectorAll(".sec").forEach(s =>
+    s.classList.toggle("hidden", s.id !== "sec-" + sec));
+  document.getElementById("sheetTitle").t
