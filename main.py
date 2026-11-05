@@ -108,7 +108,7 @@ def load_player(telegram_id: int):
 def load_inventory(telegram_id: int):
     result = (
         supabase.table("inventory")
-        .select("id,equipped,items(id,name,type,slot,rarity,sell_price)")
+        .select("id,equipped,qty,items(id,name,type,slot,rarity,sell_price)")
         .eq("telegram_id", telegram_id)
         .order("id")
         .execute()
@@ -384,7 +384,7 @@ def shop_sell(request: ItemRequest):
     try:
         found = (
             supabase.table("inventory")
-            .select("id,equipped,items(name,type,sell_price)")
+            .select("id,equipped,qty,items(name,type,sell_price)")
             .eq("id", request.inv_id)
             .eq("telegram_id", tid)
             .limit(1)
@@ -399,6 +399,8 @@ def shop_sell(request: ItemRequest):
         if item["type"] != "resource" or row["equipped"]:
             raise HTTPException(400, "NPC покупает только ресурсы")
 
+        total = item["sell_price"] * row["qty"]
+
         deleted = (
             supabase.table("inventory")
             .delete()
@@ -409,7 +411,7 @@ def shop_sell(request: ItemRequest):
         if not deleted.data:
             raise HTTPException(404, "Предмет уже продан")
 
-        change_balance(tid, item["sell_price"])
+        change_balance(tid, total)
 
         player = load_player(tid)
         inventory = load_inventory(tid)
@@ -420,8 +422,14 @@ def shop_sell(request: ItemRequest):
 
     return {
         "status": "success",
-        "message": "Продано: " + item["name"]
-                   + " (+" + str(item["sell_price"]) + ")",
+        "message": "Продано: " + item["name"] + " x" + str(row["qty"])
+                   + " (+" + str(total) + ")",
         "player": player,
         "inventory": inventory,
-            }
+    }
+
+
+# Лес и озеро живут в отдельном файле rtp.py
+from rtp import router as rtp_router  # noqa: E402
+
+app.include_router(rtp_router)
