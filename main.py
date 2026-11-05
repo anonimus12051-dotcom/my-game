@@ -22,6 +22,8 @@ if not SUPABASE_URL or not SUPABASE_KEY or not BOT_TOKEN:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 CLASSES = ("fighter", "rogue", "gatherer")
+INVENTORY_SIZE = 10
+STARTER_ITEMS = ["wooden_sword", "leather_helmet", "bandage", "bandage"]
 PLAYER_FIELDS = (
     "telegram_id,username,first_name,photo_url,"
     "balance,level,xp,hp,class,stat_points"
@@ -35,6 +37,11 @@ class TelegramAuthRequest(BaseModel):
 class ClassRequest(BaseModel):
     init_data: str
     player_class: str
+
+
+class ItemRequest(BaseModel):
+    init_data: str
+    inv_id: int
 
 
 def verify_telegram_data(init_data: str):
@@ -92,9 +99,55 @@ def load_player(telegram_id: int):
     return player
 
 
+def load_inventory(telegram_id: int):
+    result = (
+        supabase.table("inventory")
+        .select("id,equipped,items(id,name,type,slot,rarity)")
+        .eq("telegram_id", telegram_id)
+        .order("id")
+        .execute()
+    )
+    return result.data
+
+
+def give_starter_items(telegram_id: int):
+    claim = (
+        supabase.table("players")
+        .update({"starter_given": True})
+        .eq("telegram_id", telegram_id)
+        .eq("starter_given", False)
+        .execute()
+    )
+    if not claim.data:
+        return
+
+    rows = [
+        {"telegram_id": telegram_id, "item_id": item_id}
+        for item_id in STARTER_ITEMS
+    ]
+    supabase.table("inventory").insert(rows).execute()
+
+
+def get_own_row(telegram_id: int, inv_id: int):
+    result = (
+        supabase.table("inventory")
+        .select("id,equipped,items(slot)")
+        .eq("id", inv_id)
+        .eq("telegram_id", telegram_id)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(404, "Item not found")
+    return result.data[0]
+
+
 @app.get("/")
 def home():
-    return FileResponse("static/index.html")
+    return FileResponse(
+        "static/index.html",
+        headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/health")
@@ -130,13 +183,15 @@ def telegram_auth(request: TelegramAuthRequest):
         supabase.table("players").upsert(
             player_data, on_conflict="telegram_id"
         ).execute()
+        give_starter_items(user["id"])
         player = load_player(user["id"])
+        inventory = load_inventory(user["id"])
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(500, "Database error")
 
-    return {"status": "success", "player": player}
+    return {"status": "success", "player": player, "inventory": inventory}
 
 
 @app.post("/profile/class")
@@ -157,3 +212,59 @@ def set_class(request: ClassRequest):
         raise HTTPException(500, "Database error")
 
     return {"status": "success", "player": player}
+
+
+@app.post("/inventory/equip")
+def equip(request: ItemRequest):
+    user = verify_telegram_data(request.init_data)
+
+    try:
+        row = get_own_row(user["id"], request.inv_id)
+        slot = (row.get("items") or {}).get("slot")
+
+        if not slot:
+            raise HTTPException(400, "This item cannot be equipped")
+
+        # снять всё, что уже надето в этот слот
+        same_slot = (
+            supabase.table("inventory")
+            .select("id,items!inner(slot)")
+            .eq("telegram_id", user["id"])
+            .eq("equipped", True)
+            .eq("items.slot", slot)
+            .execute()
+        )
+        for old in same_slot.data:
+            supabase.table("inventory").update(
+                {"equipped": False}
+            ).eq("id", old["id"]).execute()
+
+        supabase.table("inventory").update(
+            {"equipped": True}
+        ).eq("id", request.inv_id).eq("telegram_id", user["id"]).execute()
+
+        inventory = load_inventory(user["id"])
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(500, "Database error")
+
+    return {"status": "success", "inventory": inventory}
+
+
+@app.post("/inventory/unequip")
+def unequip(request: ItemRequest):
+    user = verify_telegram_data(request.init_data)
+
+    try:
+        get_own_row(user["id"], request.inv_id)
+        supabase.table("inventory").update(
+            {"equipped": False}
+        ).eq("id", request.inv_id).eq("telegram_id", user["id"]).execute()
+        inventory = load_inventory(user["id"])
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(500, "Database error")
+
+    return {"status": "success", "inventory": inventory}
