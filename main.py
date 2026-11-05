@@ -22,6 +22,7 @@ if not SUPABASE_URL or not SUPABASE_KEY or not BOT_TOKEN:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 CLASSES = ("fighter", "rogue", "gatherer")
+SHOP_CATEGORIES = ["pvp", "mine", "other"]
 INVENTORY_SIZE = 10
 STARTER_ITEMS = ["wooden_sword", "leather_helmet", "bandage", "bandage"]
 PLAYER_FIELDS = (
@@ -42,6 +43,11 @@ class ClassRequest(BaseModel):
 class ItemRequest(BaseModel):
     init_data: str
     inv_id: int
+
+
+class BuyRequest(BaseModel):
+    init_data: str
+    item_id: str
 
 
 def verify_telegram_data(init_data: str):
@@ -102,12 +108,44 @@ def load_player(telegram_id: int):
 def load_inventory(telegram_id: int):
     result = (
         supabase.table("inventory")
-        .select("id,equipped,items(id,name,type,slot,rarity)")
+        .select("id,equipped,items(id,name,type,slot,rarity,sell_price)")
         .eq("telegram_id", telegram_id)
         .order("id")
         .execute()
     )
     return result.data
+
+
+def change_balance(telegram_id: int, delta: int):
+    """Безопасно меняет серебро. Не даёт уйти в минус."""
+    for _ in range(5):
+        result = (
+            supabase.table("players")
+            .select("balance")
+            .eq("telegram_id", telegram_id)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            raise HTTPException(404, "Player not found")
+
+        old = result.data[0]["balance"]
+        new = old + delta
+
+        if new < 0:
+            raise HTTPException(400, "Не хватает серебра")
+
+        updated = (
+            supabase.table("players")
+            .update({"balance": new})
+            .eq("telegram_id", telegram_id)
+            .eq("balance", old)
+            .execute()
+        )
+        if updated.data:
+            return new
+
+    raise HTTPException(409, "Попробуй ещё раз")
 
 
 def give_starter_items(telegram_id: int):
@@ -223,9 +261,8 @@ def equip(request: ItemRequest):
         slot = (row.get("items") or {}).get("slot")
 
         if not slot:
-            raise HTTPException(400, "This item cannot be equipped")
+            raise HTTPException(400, "Этот предмет нельзя надеть")
 
-        # снять всё, что уже надето в этот слот
         same_slot = (
             supabase.table("inventory")
             .select("id,items!inner(slot)")
@@ -268,3 +305,123 @@ def unequip(request: ItemRequest):
         raise HTTPException(500, "Database error")
 
     return {"status": "success", "inventory": inventory}
+
+
+@app.get("/shop/items")
+def shop_items():
+    try:
+        result = (
+            supabase.table("items")
+            .select("id,name,type,slot,rarity,price,shop_category")
+            .in_("shop_category", SHOP_CATEGORIES)
+            .order("price")
+            .execute()
+        )
+    except Exception:
+        raise HTTPException(500, "Database error")
+
+    return {"items": result.data}
+
+
+@app.post("/shop/buy")
+def shop_buy(request: BuyRequest):
+    user = verify_telegram_data(request.init_data)
+    tid = user["id"]
+
+    try:
+        found = (
+            supabase.table("items")
+            .select("id,name,price")
+            .eq("id", request.item_id)
+            .in_("shop_category", SHOP_CATEGORIES)
+            .limit(1)
+            .execute()
+        )
+        if not found.data:
+            raise HTTPException(404, "Этого предмета нет в магазине")
+
+        item = found.data[0]
+
+        owned = (
+            supabase.table("inventory")
+            .select("id")
+            .eq("telegram_id", tid)
+            .execute()
+        )
+        if len(owned.data) >= INVENTORY_SIZE:
+            raise HTTPException(400, "Инвентарь полон")
+
+        change_balance(tid, -item["price"])
+
+        try:
+            supabase.table("inventory").insert(
+                {"telegram_id": tid, "item_id": item["id"]}
+            ).execute()
+        except Exception:
+            change_balance(tid, item["price"])
+            raise HTTPException(500, "Database error")
+
+        player = load_player(tid)
+        inventory = load_inventory(tid)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(500, "Database error")
+
+    return {
+        "status": "success",
+        "message": "Куплено: " + item["name"],
+        "player": player,
+        "inventory": inventory,
+    }
+
+
+@app.post("/shop/sell")
+def shop_sell(request: ItemRequest):
+    user = verify_telegram_data(request.init_data)
+    tid = user["id"]
+
+    try:
+        found = (
+            supabase.table("inventory")
+            .select("id,equipped,items(name,type,sell_price)")
+            .eq("id", request.inv_id)
+            .eq("telegram_id", tid)
+            .limit(1)
+            .execute()
+        )
+        if not found.data:
+            raise HTTPException(404, "Предмет не найден")
+
+        row = found.data[0]
+        item = row["items"]
+
+        if item["type"] != "resource" or row["equipped"]:
+            raise HTTPException(400, "NPC покупает только ресурсы")
+
+        deleted = (
+            supabase.table("inventory")
+            .delete()
+            .eq("id", request.inv_id)
+            .eq("telegram_id", tid)
+            .execute()
+        )
+        if not deleted.data:
+            raise HTTPException(404, "Предмет уже продан")
+
+        change_balance(tid, item["sell_price"])
+
+        player = load_player(tid)
+        inventory = load_inventory(tid)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(500, "Database error")
+
+    return {
+        "status": "success",
+        "message": "Продано: " + item["name"]
+                   + " (+" + str(item["sell_price"]) + ")",
+        "player": player,
+        "inventory": inventory,
+            }
