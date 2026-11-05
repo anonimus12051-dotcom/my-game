@@ -15,10 +15,12 @@
   .fill { height:100%; }
   #hpFill { background:#d64545; }
   #xpFill { background:#4a90e2; }
-  .classes { display:flex; gap:8px; }
-  .classes button { flex:1; padding:10px 4px; border:2px solid #444;
+  .tabs, .classes, .cats { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button, .classes button, .cats button {
+         flex:1; padding:10px 4px; border:2px solid #444;
          background:#1b1b24; color:#eee; border-radius:8px; font-size:14px; }
-  .classes button.active { border-color:#f5c542; color:#f5c542; }
+  .tabs button.active, .classes button.active, .cats button.active {
+         border-color:#f5c542; color:#f5c542; }
   .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
   .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
   .slot { aspect-ratio:1; background:#1b1b24; border:1px dashed #555;
@@ -27,8 +29,16 @@
          text-align:center; padding:2px; word-break:break-word; }
   .slot.full { border:2px solid #888; color:#eee; }
   .slot.on { border-color:#f5c542; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         padding:10px 0; border-bottom:1px solid #333; gap:8px; }
+  .row:last-child { border-bottom:none; }
+  .row small { color:#aaa; }
+  .row button { padding:8px 14px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; }
+  .uncommon { color:#6fd16f; }
   .hint { color:#888; font-size:12px; margin-top:6px; }
-  #status { color:#aaa; font-size:13px; }
+  #status { color:#f5c542; font-size:14px; min-height:20px; }
+  .hidden { display:none; }
 </style>
 </head>
 <body>
@@ -40,37 +50,61 @@
     </div>
   </div>
 
-  <div class="card">
-    <div id="levelText">Уровень 1</div>
-    <div>HP: <span id="hpText"></span></div>
-    <div class="bar"><div class="fill" id="hpFill"></div></div>
-    <div>Опыт: <span id="xpText"></span></div>
-    <div class="bar"><div class="fill" id="xpFill"></div></div>
-    <div>Очки прокачки: <span id="points">0</span></div>
-  </div>
-
-  <div class="card">
-    <div style="margin-bottom:8px">Класс</div>
-    <div class="classes">
-      <button data-c="fighter">Боец</button>
-      <button data-c="rogue">Плут</button>
-      <button data-c="gatherer">Сборщик</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div style="margin-bottom:8px">Экипировка</div>
-    <div class="grid4" id="equip"></div>
-    <div class="hint">Нажми на надетый предмет, чтобы снять</div>
-  </div>
-
-  <div class="card">
-    <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
-    <div class="grid5" id="inv"></div>
-    <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
+  <div class="tabs">
+    <button data-t="profile" class="active">Профиль</button>
+    <button data-t="shop">Магазин</button>
+    <button data-t="sell">Скупка</button>
   </div>
 
   <div id="status">Загрузка...</div>
+
+  <div id="tab-profile">
+    <div class="card">
+      <div id="levelText">Уровень 1</div>
+      <div>HP: <span id="hpText"></span></div>
+      <div class="bar"><div class="fill" id="hpFill"></div></div>
+      <div>Опыт: <span id="xpText"></span></div>
+      <div class="bar"><div class="fill" id="xpFill"></div></div>
+      <div>Очки прокачки: <span id="points">0</span></div>
+    </div>
+
+    <div class="card">
+      <div style="margin-bottom:8px">Класс</div>
+      <div class="classes" style="margin-bottom:0">
+        <button data-c="fighter">Боец</button>
+        <button data-c="rogue">Плут</button>
+        <button data-c="gatherer">Сборщик</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="margin-bottom:8px">Экипировка</div>
+      <div class="grid4" id="equip"></div>
+      <div class="hint">Нажми на надетый предмет, чтобы снять</div>
+    </div>
+
+    <div class="card">
+      <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
+      <div class="grid5" id="inv"></div>
+      <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
+    </div>
+  </div>
+
+  <div id="tab-shop" class="hidden">
+    <div class="cats">
+      <button data-cat="pvp" class="active">PvP</button>
+      <button data-cat="mine">Шахта</button>
+      <button data-cat="other">Остальное</button>
+    </div>
+    <div class="card" id="shopList"></div>
+  </div>
+
+  <div id="tab-sell" class="hidden">
+    <div class="card">
+      <div style="margin-bottom:8px">NPC-скупщик покупает ресурсы</div>
+      <div id="sellList"></div>
+    </div>
+  </div>
 
 <script>
 const tg = window.Telegram.WebApp;
@@ -84,6 +118,9 @@ const SLOTS = [
   ["weapon","Оружие"]
 ];
 const INV_SIZE = 10;
+let shopItems = [];
+let shopCat = "pvp";
+let inventory = [];
 
 function show(p) {
   document.getElementById("name").textContent = p.first_name || p.username || "Игрок";
@@ -101,6 +138,8 @@ function show(p) {
 }
 
 function showInventory(list) {
+  inventory = list;
+
   const equip = document.getElementById("equip");
   equip.innerHTML = "";
   SLOTS.forEach(([key, label]) => {
@@ -134,34 +173,114 @@ function showInventory(list) {
     }
     inv.appendChild(d);
   }
+
+  showSell();
+}
+
+function makeRow(title, sub, btnText, onClick, cls) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const left = document.createElement("div");
+  const t = document.createElement("div");
+  t.textContent = title;
+  if (cls) t.className = cls;
+  const s = document.createElement("small");
+  s.textContent = sub;
+  left.appendChild(t);
+  left.appendChild(s);
+  const b = document.createElement("button");
+  b.textContent = btnText;
+  b.onclick = onClick;
+  row.appendChild(left);
+  row.appendChild(b);
+  return row;
+}
+
+function showShop() {
+  const box = document.getElementById("shopList");
+  box.innerHTML = "";
+  shopItems.filter(i => i.shop_category === shopCat).forEach(i => {
+    const rarity = i.rarity === "uncommon" ? "Необычный" : "Обычный";
+    box.appendChild(makeRow(
+      i.name,
+      rarity + " · " + i.price + " серебра",
+      "Купить",
+      () => buy(i.id),
+      i.rarity === "uncommon" ? "uncommon" : ""
+    ));
+  });
+}
+
+function showSell() {
+  const box = document.getElementById("sellList");
+  box.innerHTML = "";
+  const res = inventory.filter(r => r.items.type === "resource" && !r.equipped);
+  if (!res.length) {
+    box.textContent = "Нет ресурсов для продажи";
+    return;
+  }
+  res.forEach(r => {
+    box.appendChild(makeRow(
+      r.items.name,
+      r.items.sell_price + " серебра",
+      "Продать",
+      () => sell(r.id)
+    ));
+  });
 }
 
 async function call(url, body) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error("Ошибка " + r.status);
+  const opts = body
+    ? {method: "POST",
+       headers: {"Content-Type": "application/json"},
+       body: JSON.stringify(body)}
+    : {};
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let msg = "Ошибка " + r.status;
+    try {
+      const j = await r.json();
+      if (j.detail) msg = j.detail;
+    } catch (e) {}
+    throw new Error(msg);
+  }
   return r.json();
+}
+
+function apply(res) {
+  if (res.player) show(res.player);
+  if (res.inventory) showInventory(res.inventory);
+  status.textContent = res.message || "";
 }
 
 async function act(url, invId) {
   try {
-    const res = await call(url, {init_data: tg.initData, inv_id: invId});
-    showInventory(res.inventory);
-    status.textContent = "";
+    apply(await call(url, {init_data: tg.initData, inv_id: invId}));
   } catch (e) {
-    status.textContent = "Ошибка: " + e.message;
+    status.textContent = e.message;
   }
+}
+
+async function buy(itemId) {
+  try {
+    apply(await call("/shop/buy", {init_data: tg.initData, item_id: itemId}));
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+async function sell(invId) {
+  await act("/shop/sell", invId);
 }
 
 async function start() {
   try {
     const res = await call("/auth/telegram", {init_data: tg.initData});
-    show(res.player);
-    showInventory(res.inventory);
+    apply(res);
     status.textContent = "";
+    const shop = await call("/shop/items");
+    shopItems = shop.items;
+    showShop();
   } catch (e) {
     status.textContent = "Не удалось войти: " + e.message;
   }
@@ -174,8 +293,28 @@ document.querySelectorAll(".classes button").forEach(b => {
         {init_data: tg.initData, player_class: b.dataset.c});
       show(res.player);
     } catch (e) {
-      status.textContent = "Ошибка: " + e.message;
+      status.textContent = e.message;
     }
+  };
+});
+
+document.querySelectorAll(".cats button").forEach(b => {
+  b.onclick = () => {
+    shopCat = b.dataset.cat;
+    document.querySelectorAll(".cats button").forEach(x =>
+      x.classList.toggle("active", x === b));
+    showShop();
+  };
+});
+
+document.querySelectorAll(".tabs button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach(x =>
+      x.classList.toggle("active", x === b));
+    ["profile", "shop", "sell"].forEach(t =>
+      document.getElementById("tab-" + t)
+        .classList.toggle("hidden", t !== b.dataset.t));
+    status.textContent = "";
   };
 });
 
