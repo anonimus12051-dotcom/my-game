@@ -19,10 +19,15 @@
   .classes button { flex:1; padding:10px 4px; border:2px solid #444;
          background:#1b1b24; color:#eee; border-radius:8px; font-size:14px; }
   .classes button.active { border-color:#f5c542; color:#f5c542; }
-  .slots { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
   .slot { aspect-ratio:1; background:#1b1b24; border:1px dashed #555;
          border-radius:8px; display:flex; align-items:center;
-         justify-content:center; font-size:11px; color:#888; text-align:center; }
+         justify-content:center; font-size:10px; color:#888;
+         text-align:center; padding:2px; word-break:break-word; }
+  .slot.full { border:2px solid #888; color:#eee; }
+  .slot.on { border-color:#f5c542; }
+  .hint { color:#888; font-size:12px; margin-top:6px; }
   #status { color:#aaa; font-size:13px; }
 </style>
 </head>
@@ -55,7 +60,14 @@
 
   <div class="card">
     <div style="margin-bottom:8px">Экипировка</div>
-    <div class="slots" id="slots"></div>
+    <div class="grid4" id="equip"></div>
+    <div class="hint">Нажми на надетый предмет, чтобы снять</div>
+  </div>
+
+  <div class="card">
+    <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
+    <div class="grid5" id="inv"></div>
+    <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
   </div>
 
   <div id="status">Загрузка...</div>
@@ -66,14 +78,12 @@ tg.ready();
 tg.expand();
 
 const status = document.getElementById("status");
-
-["Шлем","Нагрудник","Перчатки","Штаны","Ботинки","Амулет","Оружие"]
-  .forEach(n => {
-    const d = document.createElement("div");
-    d.className = "slot";
-    d.textContent = n;
-    document.getElementById("slots").appendChild(d);
-  });
+const SLOTS = [
+  ["helmet","Шлем"], ["chest","Нагрудник"], ["gloves","Перчатки"],
+  ["pants","Штаны"], ["boots","Ботинки"], ["amulet","Амулет"],
+  ["weapon","Оружие"]
+];
+const INV_SIZE = 10;
 
 function show(p) {
   document.getElementById("name").textContent = p.first_name || p.username || "Игрок";
@@ -90,6 +100,42 @@ function show(p) {
     b.classList.toggle("active", b.dataset.c === p.class));
 }
 
+function showInventory(list) {
+  const equip = document.getElementById("equip");
+  equip.innerHTML = "";
+  SLOTS.forEach(([key, label]) => {
+    const row = list.find(r => r.equipped && r.items && r.items.slot === key);
+    const d = document.createElement("div");
+    d.className = "slot" + (row ? " full on" : "");
+    d.textContent = row ? row.items.name : label;
+    if (row) d.onclick = () => act("/inventory/unequip", row.id);
+    equip.appendChild(d);
+  });
+
+  const inv = document.getElementById("inv");
+  inv.innerHTML = "";
+  document.getElementById("invCount").textContent =
+    "(" + list.length + "/" + INV_SIZE + ")";
+  for (let i = 0; i < INV_SIZE; i++) {
+    const row = list[i];
+    const d = document.createElement("div");
+    if (row) {
+      d.className = "slot full" + (row.equipped ? " on" : "");
+      d.textContent = (row.equipped ? "✓ " : "") + row.items.name;
+      d.onclick = () => {
+        if (!row.items.slot) {
+          status.textContent = "Этот предмет нельзя надеть";
+          return;
+        }
+        act(row.equipped ? "/inventory/unequip" : "/inventory/equip", row.id);
+      };
+    } else {
+      d.className = "slot";
+    }
+    inv.appendChild(d);
+  }
+}
+
 async function call(url, body) {
   const r = await fetch(url, {
     method: "POST",
@@ -100,10 +146,21 @@ async function call(url, body) {
   return r.json();
 }
 
+async function act(url, invId) {
+  try {
+    const res = await call(url, {init_data: tg.initData, inv_id: invId});
+    showInventory(res.inventory);
+    status.textContent = "";
+  } catch (e) {
+    status.textContent = "Ошибка: " + e.message;
+  }
+}
+
 async function start() {
   try {
     const res = await call("/auth/telegram", {init_data: tg.initData});
     show(res.player);
+    showInventory(res.inventory);
     status.textContent = "";
   } catch (e) {
     status.textContent = "Не удалось войти: " + e.message;
