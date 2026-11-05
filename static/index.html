@@ -6,16 +6,15 @@
 <title>Моя игра</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  body { margin:0; padding:12px; font-family:sans-serif;
+  body { margin:0; padding:12px 12px 150px; font-family:sans-serif;
          background:#1b1b24; color:#eee; }
-  .card { background:#272735; border-radius:12px; padding:14px; margin-bottom:12px; }
   .top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   #avatar { width:44px; height:44px; border-radius:50%; background:#444; object-fit:cover; }
   .top .info { flex:1; }
   #profileBtn { padding:10px 14px; border:none; border-radius:8px;
          background:#f5c542; color:#111; font-weight:bold; }
-  #world { display:block; width:100%; max-width:420px; margin:0 auto;
-         border-radius:12px; touch-action:none; }
+  #world { display:block; margin:0 auto; border-radius:12px; touch-action:none;
+         width:min(100%, calc((100vh - 220px) * 0.6923)); height:auto; }
   .bar { height:14px; background:#111; border-radius:7px; overflow:hidden; margin:4px 0 10px; }
   .fill { height:100%; }
   #hpFill { background:#d64545; }
@@ -34,19 +33,39 @@
          text-align:center; padding:2px; word-break:break-word; }
   .slot.full { border:2px solid #888; color:#eee; }
   .slot.on { border-color:#f5c542; }
+  .del .slot.full { border-color:#d64545; }
   .row { display:flex; justify-content:space-between; align-items:center;
          padding:10px 0; border-bottom:1px solid #333; gap:8px; }
   .row:last-child { border-bottom:none; }
   .row small { color:#aaa; }
-  .row button, .big { padding:8px 14px; border:none; border-radius:8px;
+  .row button, .big, .act { padding:8px 14px; border:none; border-radius:8px;
          background:#f5c542; color:#111; font-weight:bold; }
   .big { display:block; width:100%; padding:14px; margin-bottom:10px; font-size:15px; }
+  .small { width:100%; margin-top:8px; padding:8px; border:2px solid #444;
+         background:#1b1b24; color:#eee; border-radius:8px; }
+  .small.danger { border-color:#d64545; color:#ff8a8a; }
   .uncommon { color:#6fd16f; }
   .hint { color:#888; font-size:12px; margin-top:6px; }
   .hidden { display:none !important; }
   #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%);
          background:#f5c542; color:#111; padding:8px 14px; border-radius:8px;
          font-size:14px; z-index:100; max-width:90%; text-align:center; }
+  #actions { position:fixed; left:0; right:0; bottom:0; z-index:20;
+         background:#272735; padding:10px 12px 14px; border-top:2px solid #444;
+         text-align:center; }
+  #sceneInfo { font-size:14px; margin-bottom:8px; min-height:18px; }
+  .btnrow { display:flex; gap:8px; }
+  .btnrow button { flex:1; padding:12px 6px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; font-size:14px; }
+  .btnrow button.gray { background:#444; color:#eee; }
+  .btnrow button:disabled { opacity:.4; }
+  #fishTitle { font-size:15px; margin-bottom:6px; }
+  #fishSeq { font-size:28px; min-height:40px; letter-spacing:4px; }
+  #fishProg { font-size:18px; letter-spacing:4px; margin:4px 0 8px; min-height:22px; }
+  .pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+         max-width:240px; margin:0 auto; }
+  .pad button { padding:12px; font-size:22px; border:none; border-radius:8px;
+         background:#3a3a4e; }
   #overlay { position:fixed; inset:0; background:rgba(0,0,0,.55);
          z-index:50; display:flex; align-items:flex-end; }
   #sheet { background:#272735; width:100%; max-height:82vh; overflow-y:auto;
@@ -69,6 +88,27 @@
 
   <canvas id="world"></canvas>
   <div id="toast" class="hidden"></div>
+
+  <div id="actions" class="hidden">
+    <div id="sceneInfo"></div>
+    <div class="btnrow" id="btnrow">
+      <button id="bChop">🪓 Рубить</button>
+      <button id="bDig" class="hidden">⛏ Копать клад</button>
+      <button id="bCast" class="hidden">🎣 Забросить</button>
+      <button id="bLeave" class="gray">🏠 На спавн</button>
+    </div>
+    <div id="fishgame" class="hidden">
+      <div id="fishTitle"></div>
+      <div id="fishSeq"></div>
+      <div id="fishProg"></div>
+      <div id="fishPad" class="pad hidden">
+        <button data-d="up" style="grid-column:2;grid-row:1">⬆️</button>
+        <button data-d="left" style="grid-column:1;grid-row:2">⬅️</button>
+        <button data-d="down" style="grid-column:2;grid-row:2">⬇️</button>
+        <button data-d="right" style="grid-column:3;grid-row:2">➡️</button>
+      </div>
+    </div>
+  </div>
 
   <div id="overlay" class="hidden">
     <div id="sheet">
@@ -99,10 +139,11 @@
           <div class="grid4" id="equip"></div>
           <div class="hint">Нажми на надетый предмет, чтобы снять</div>
         </div>
-        <div class="inner">
+        <div class="inner" id="invBox">
           <div style="margin-bottom:8px">Инвентарь <span id="invCount"></span></div>
           <div class="grid5" id="inv"></div>
           <div class="hint">Нажми на предмет, чтобы надеть или снять</div>
+          <button id="delBtn" class="small">🗑 Режим удаления: выкл</button>
         </div>
       </div>
 
@@ -121,7 +162,7 @@
         </div>
         <div id="m-sell" class="hidden">
           <div class="inner">
-            <div style="margin-bottom:8px">Я покупаю дерево, рыбу и руду</div>
+            <div style="margin-bottom:8px">Я покупаю ресурсы: дерево, рыбу, руду, слитки</div>
             <div id="sellList"></div>
           </div>
         </div>
@@ -146,377 +187,7 @@
     </div>
   </div>
 
-<script>
-const tg = window.Telegram.WebApp;
-tg.ready();
-tg.expand();
-
-/* ---------- сообщения ---------- */
-const toastEl = document.getElementById("toast");
-let toastTimer;
-function setStatus(msg) {
-  clearTimeout(toastTimer);
-  toastEl.textContent = msg || "";
-  toastEl.classList.toggle("hidden", !msg);
-  if (msg) toastTimer = setTimeout(() => toastEl.classList.add("hidden"), 3000);
-}
-
-/* ---------- данные игрока ---------- */
-const SLOTS = [
-  ["helmet","Шлем"], ["chest","Нагрудник"], ["gloves","Перчатки"],
-  ["pants","Штаны"], ["boots","Ботинки"], ["amulet","Амулет"],
-  ["weapon","Оружие"]
-];
-const INV_SIZE = 10;
-let shopItems = [];
-let shopCat = "pvp";
-let inventory = [];
-
-const CLASS_COLORS = {fighter:"#d64545", rogue:"#7a4ad6", gatherer:"#3fae5a"};
-const me = {x:180, y:320, tx:null, ty:null, pending:null,
-            name:"Игрок", cls:"fighter"};
-
-function show(p) {
-  me.name = p.first_name || p.username || "Игрок";
-  me.cls = p.class;
-  document.getElementById("name").textContent = me.name;
-  document.getElementById("silver").textContent = "Серебро: " + p.balance;
-  document.getElementById("levelText").textContent = "Уровень " + p.level;
-  document.getElementById("hpText").textContent = p.hp + " / 100";
-  document.getElementById("hpFill").style.width = Math.min(100, p.hp) + "%";
-  document.getElementById("xpText").textContent = p.xp + " / " + p.xp_to_next;
-  document.getElementById("xpFill").style.width =
-      Math.min(100, p.xp / p.xp_to_next * 100) + "%";
-  document.getElementById("points").textContent = p.stat_points;
-  if (p.photo_url) document.getElementById("avatar").src = p.photo_url;
-  document.querySelectorAll(".classes button").forEach(b =>
-    b.classList.toggle("active", b.dataset.c === p.class));
-}
-
-function showInventory(list) {
-  inventory = list;
-
-  const equip = document.getElementById("equip");
-  equip.innerHTML = "";
-  SLOTS.forEach(([key, label]) => {
-    const row = list.find(r => r.equipped && r.items && r.items.slot === key);
-    const d = document.createElement("div");
-    d.className = "slot" + (row ? " full on" : "");
-    d.textContent = row ? row.items.name : label;
-    if (row) d.onclick = () => act("/inventory/unequip", row.id);
-    equip.appendChild(d);
-  });
-
-  const inv = document.getElementById("inv");
-  inv.innerHTML = "";
-  document.getElementById("invCount").textContent =
-    "(" + list.length + "/" + INV_SIZE + ")";
-  for (let i = 0; i < INV_SIZE; i++) {
-    const row = list[i];
-    const d = document.createElement("div");
-    if (row) {
-      d.className = "slot full" + (row.equipped ? " on" : "");
-      d.textContent = (row.equipped ? "✓ " : "") + row.items.name;
-      d.onclick = () => {
-        if (!row.items.slot) {
-          setStatus("Этот предмет нельзя надеть");
-          return;
-        }
-        act(row.equipped ? "/inventory/unequip" : "/inventory/equip", row.id);
-      };
-    } else {
-      d.className = "slot";
-    }
-    inv.appendChild(d);
-  }
-
-  showSell();
-}
-
-function makeRow(title, sub, btnText, onClick, cls) {
-  const row = document.createElement("div");
-  row.className = "row";
-  const left = document.createElement("div");
-  const t = document.createElement("div");
-  t.textContent = title;
-  if (cls) t.className = cls;
-  const s = document.createElement("small");
-  s.textContent = sub;
-  left.appendChild(t);
-  left.appendChild(s);
-  const b = document.createElement("button");
-  b.textContent = btnText;
-  b.onclick = onClick;
-  row.appendChild(left);
-  row.appendChild(b);
-  return row;
-}
-
-function showShop() {
-  const box = document.getElementById("shopList");
-  box.innerHTML = "";
-  shopItems.filter(i => i.shop_category === shopCat).forEach(i => {
-    const rarity = i.rarity === "uncommon" ? "Необычный" : "Обычный";
-    box.appendChild(makeRow(
-      i.name,
-      rarity + " · " + i.price + " серебра",
-      "Купить",
-      () => buy(i.id),
-      i.rarity === "uncommon" ? "uncommon" : ""
-    ));
-  });
-}
-
-function showSell() {
-  const box = document.getElementById("sellList");
-  box.innerHTML = "";
-  const res = inventory.filter(r => r.items.type === "resource" && !r.equipped);
-  if (!res.length) {
-    box.textContent = "Нет ресурсов для продажи";
-    return;
-  }
-  res.forEach(r => {
-    box.appendChild(makeRow(
-      r.items.name,
-      r.items.sell_price + " серебра",
-      "Продать",
-      () => sell(r.id)
-    ));
-  });
-}
-
-/* ---------- запросы к серверу ---------- */
-async function call(url, body) {
-  const opts = body
-    ? {method: "POST",
-       headers: {"Content-Type": "application/json"},
-       body: JSON.stringify(body)}
-    : {};
-  const r = await fetch(url, opts);
-  if (!r.ok) {
-    let msg = "Ошибка " + r.status;
-    try {
-      const j = await r.json();
-      if (j.detail) msg = j.detail;
-    } catch (e) {}
-    throw new Error(msg);
-  }
-  return r.json();
-}
-
-function apply(res) {
-  if (res.player) show(res.player);
-  if (res.inventory) showInventory(res.inventory);
-  setStatus(res.message || "");
-}
-
-async function act(url, invId) {
-  try {
-    apply(await call(url, {init_data: tg.initData, inv_id: invId}));
-  } catch (e) {
-    setStatus(e.message);
-  }
-}
-
-async function buy(itemId) {
-  try {
-    apply(await call("/shop/buy", {init_data: tg.initData, item_id: itemId}));
-  } catch (e) {
-    setStatus(e.message);
-  }
-}
-
-async function sell(invId) {
-  await act("/shop/sell", invId);
-}
-
-async function start() {
-  setStatus("Загрузка...");
-  try {
-    const res = await call("/auth/telegram", {init_data: tg.initData});
-    apply(res);
-    setStatus("");
-    const shop = await call("/shop/items");
-    shopItems = shop.items;
-    showShop();
-  } catch (e) {
-    setStatus("Не удалось войти: " + e.message);
-  }
-}
-
-/* ---------- окна ---------- */
-const overlay = document.getElementById("overlay");
-
-function openSheet(sec, title) {
-  document.querySelectorAll(".sec").forEach(s =>
-    s.classList.toggle("hidden", s.id !== "sec-" + sec));
-  document.getElementById("sheetTitle").textContent = title;
-  overlay.classList.remove("hidden");
-}
-function closeSheet() { overlay.classList.add("hidden"); }
-
-document.getElementById("sheetClose").onclick = closeSheet;
-overlay.onclick = e => { if (e.target === overlay) closeSheet(); };
-document.getElementById("profileBtn").onclick = () => openSheet("profile", "Профиль");
-document.getElementById("gBase").onclick = () => setStatus("Строительство баз скоро появится");
-document.getElementById("gRtp").onclick = () => setStatus("RTP скоро появится");
-
-document.querySelectorAll(".classes button").forEach(b => {
-  b.onclick = async () => {
-    try {
-      const res = await call("/profile/class",
-        {init_data: tg.initData, player_class: b.dataset.c});
-      show(res.player);
-    } catch (e) {
-      setStatus(e.message);
-    }
-  };
-});
-
-document.querySelectorAll(".cats button").forEach(b => {
-  b.onclick = () => {
-    shopCat = b.dataset.cat;
-    document.querySelectorAll(".cats button").forEach(x =>
-      x.classList.toggle("active", x === b));
-    showShop();
-  };
-});
-
-document.querySelectorAll("[data-m]").forEach(b => {
-  b.onclick = () => {
-    document.querySelectorAll("[data-m]").forEach(x =>
-      x.classList.toggle("active", x === b));
-    document.getElementById("m-buy").classList.toggle("hidden", b.dataset.m !== "buy");
-    document.getElementById("m-sell").classList.toggle("hidden", b.dataset.m !== "sell");
-  };
-});
-
-/* ---------- мир (спавн) ---------- */
-const W = 360, H = 520;
-const canvas = document.getElementById("world");
-const ctx = canvas.getContext("2d");
-const dpr = window.devicePixelRatio || 1;
-canvas.width = W * dpr;
-canvas.height = H * dpr;
-ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-const places = [
-  {id:"auction",  name:"Аукцион",  emoji:"⚖️", x:25,  y:35,  w:120, h:85, color:"#8a5a2b", roof:"#b33a3a", door:{x:85,  y:140}, title:"Аукцион"},
-  {id:"merchant", name:"Торговец", emoji:"🧑‍🌾", x:215, y:35,  w:120, h:85, color:"#2b6a8a", roof:"#2a9a6a", door:{x:275, y:140}, title:"Торговец"},
-  {id:"forge",    name:"Кузня",    emoji:"🔨", x:15,  y:225, w:95,  h:85, color:"#555",    roof:"#333",    door:{x:128, y:268}, title:"Кузня"},
-  {id:"mine",     name:"Шахта",    emoji:"⛏️", x:250, y:225, w:95,  h:85, color:"#6b5a4a", roof:"#3a2f26", door:{x:232, y:268}, title:"Шахта"},
-  {id:"gates",    name:"Ворота",   emoji:"🚪", x:120, y:440, w:120, h:70, color:"#7a7a7a", roof:"#444",    door:{x:180, y:425}, title:"Ворота"}
-];
-
-function openPlace(id) {
-  const p = places.find(x => x.id === id);
-  openSheet(id, p.title);
-}
-
-function go(x, y, pending) {
-  me.tx = x; me.ty = y; me.pending = pending;
-  if (Math.hypot(x - me.x, y - me.y) < 3) {
-    me.tx = null;
-    if (pending) { me.pending = null; openPlace(pending); }
-  }
-}
-
-canvas.addEventListener("pointerdown", e => {
-  const r = canvas.getBoundingClientRect();
-  const x = (e.clientX - r.left) * W / r.width;
-  const y = (e.clientY - r.top) * H / r.height;
-  const hit = places.find(p =>
-    x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h);
-  if (hit) {
-    go(hit.door.x, hit.door.y, hit.id);
-  } else {
-    go(Math.max(12, Math.min(W - 12, x)),
-       Math.max(12, Math.min(H - 12, y)), null);
-  }
-});
-
-function emoji(txt, x, y, size) {
-  ctx.font = size + "px serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(txt, x, y);
-}
-
-function draw() {
-  ctx.fillStyle = "#3b7d3b";
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = "#b08a5a";
-  ctx.fillRect(155, 120, 50, 330);
-  ctx.fillRect(110, 245, 140, 50);
-  ctx.fillRect(65, 120, 40, 40);
-  ctx.fillRect(255, 120, 40, 40);
-  ctx.fillRect(65, 140, 140, 20);
-  ctx.fillRect(155, 140, 140, 20);
-
-  ctx.fillStyle = "#c9a66b";
-  ctx.beginPath(); ctx.arc(180, 270, 48, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#777";
-  ctx.beginPath(); ctx.arc(180, 270, 16, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#3a7bd5";
-  ctx.beginPath(); ctx.arc(180, 270, 10, 0, Math.PI * 2); ctx.fill();
-
-  [[20,175],[335,175],[28,385],[332,385],[50,478],[310,478],[100,195],[262,195]]
-    .forEach(([x, y]) => emoji("🌳", x, y, 28));
-  [[120,380],[245,370],[90,335],[275,340]]
-    .forEach(([x, y]) => emoji("🌼", x, y, 14));
-
-  places.forEach(p => {
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-    ctx.fillStyle = p.roof;
-    ctx.fillRect(p.x - 4, p.y - 8, p.w + 8, 22);
-    ctx.fillStyle = "#fff";
-    emoji(p.emoji, p.x + p.w / 2, p.y + p.h / 2 - 2, 30);
-    ctx.font = "bold 13px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "alphabetic";
-    ctx.fillText(p.name, p.x + p.w / 2, p.y + p.h - 6);
-  });
-
-  ctx.fillStyle = "rgba(0,0,0,.3)";
-  ctx.beginPath(); ctx.ellipse(me.x, me.y + 10, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = CLASS_COLORS[me.cls] || "#d64545";
-  ctx.beginPath(); ctx.arc(me.x, me.y, 10, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 12px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText(me.name, me.x, me.y - 16);
-}
-
-let last = performance.now();
-function frame(t) {
-  const dt = Math.min(0.05, (t - last) / 1000);
-  last = t;
-  if (me.tx !== null) {
-    const dx = me.tx - me.x, dy = me.ty - me.y;
-    const d = Math.hypot(dx, dy);
-    const step = 150 * dt;
-    if (d <= step) {
-      me.x = me.tx; me.y = me.ty; me.tx = null;
-      if (me.pending) {
-        const id = me.pending;
-        me.pending = null;
-        openPlace(id);
-      }
-    } else {
-      me.x += dx / d * step;
-      me.y += dy / d * step;
-    }
-  }
-  draw();
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
-
-start();
-</script>
+<script src="/js/ui.js?v=8"></script>
+<script src="/js/world.js?v=8"></script>
 </body>
 </html>
