@@ -282,3 +282,106 @@ document.querySelectorAll("[data-m]").forEach(b => {
     document.getElementById("m-sell").classList.toggle("hidden", b.dataset.m !== "sell");
   };
 });
+/* ---------- прокачка (дополнение) ---------- */
+const STAT_DEFS = [
+  ["damage", "⚔️ Урон", "+0.5 за очко", v => "+" + v],
+  ["crit", "🎯 Шанс крита (×1.5)", "+0.3% за очко", v => v + "%"],
+  ["hp", "❤️ Доп. HP", "+3 за очко", v => "+" + v],
+  ["armor", "🛡 Броня", "+0.5 за очко", v => "+" + v],
+  ["regen", "💚 Регенерация", "+0.5 за очко", v => "+" + v]
+];
+
+const statsCard = document.createElement("div");
+statsCard.className = "inner";
+const profileSec = document.getElementById("sec-profile");
+profileSec.insertBefore(statsCard, profileSec.children[1]);
+
+function renderStats(p) {
+  statsCard.innerHTML = "";
+  const h = document.createElement("div");
+  h.style.marginBottom = "8px";
+  h.textContent = "Характеристики · свободных очков: " + p.stat_points;
+  statsCard.appendChild(h);
+
+  STAT_DEFS.forEach(([key, title, hint, fmt]) => {
+    const s = p.stats[key];
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const left = document.createElement("div");
+    const t = document.createElement("div");
+    t.textContent = title + ": " + fmt(s.bonus);
+    const sm = document.createElement("small");
+    sm.textContent = "вложено " + s.points + " · " + hint;
+    left.appendChild(t);
+    left.appendChild(sm);
+
+    const btns = document.createElement("div");
+    [1, 5].forEach(n => {
+      const b = document.createElement("button");
+      b.textContent = "+" + n;
+      b.style.marginLeft = "6px";
+      const off = p.stat_points < n;
+      b.disabled = off;
+      b.style.opacity = off ? "0.4" : "1";
+      b.onclick = () => spendPoints(key, n);
+      btns.appendChild(b);
+    });
+
+    row.appendChild(left);
+    row.appendChild(btns);
+    statsCard.appendChild(row);
+  });
+}
+
+async function spendPoints(stat, n) {
+  try {
+    const res = await call("/profile/spend",
+      {init_data: tg.initData, stat: stat, amount: n});
+    show(res.player);
+  } catch (e) {
+    setStatus(e.message);
+  }
+}
+
+let lastLevel = 0;
+const baseShow = show;
+show = function (p) {
+  baseShow(p);
+  if (!p.stats) return;
+
+  const maxHp = p.max_hp || 100;
+  document.getElementById("hpText").textContent = p.hp + " / " + maxHp;
+  document.getElementById("hpFill").style.width =
+    Math.min(100, p.hp / maxHp * 100) + "%";
+
+  const maxed = p.level >= p.max_level;
+  document.getElementById("xpText").textContent =
+    maxed ? "МАКС" : p.xp + " / " + p.xp_to_next;
+  document.getElementById("xpFill").style.width =
+    maxed ? "100%" : Math.min(100, p.xp / p.xp_to_next * 100) + "%";
+
+  renderStats(p);
+
+  if (lastLevel && p.level > lastLevel) {
+    setStatus("🎉 Новый уровень: " + p.level + "! Очки ждут в профиле");
+  }
+  lastLevel = p.level;
+};
+
+let refreshTimer;
+function refreshProfile() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    try {
+      const r = await call("/profile/get", {init_data: tg.initData});
+      show(r.player);
+    } catch (e) {}
+  }, 400);
+}
+
+const baseShowInventory = showInventory;
+showInventory = function (list) {
+  baseShowInventory(list);
+  refreshProfile();
+};
