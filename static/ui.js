@@ -385,3 +385,78 @@ showInventory = function (list) {
   baseShowInventory(list);
   refreshProfile();
 };
+/* ---------- характеристики предметов (дополнение) ---------- */
+let itemCatalog = {};
+
+function statText(id) {
+  const it = itemCatalog[id];
+  if (!it) return "";
+  const parts = [];
+  if (it.damage) parts.push("урон " + it.damage);
+  if (it.hp_bonus) parts.push("+" + it.hp_bonus + " HP");
+  if (it.armor) parts.push("броня " + it.armor);
+  return parts.join(" · ");
+}
+
+function showShop() {
+  const box = document.getElementById("shopList");
+  box.innerHTML = "";
+  shopItems.filter(i => i.shop_category === shopCat).forEach(i => {
+    const rarity = i.rarity === "uncommon" ? "Необычный" : "Обычный";
+    const st = statText(i.id);
+    box.appendChild(makeRow(
+      i.name,
+      rarity + " · " + i.price + " серебра" + (st ? " · " + st : ""),
+      "Купить",
+      () => buy(i.id),
+      i.rarity === "uncommon" ? "uncommon" : ""
+    ));
+  });
+}
+
+async function loadCatalog() {
+  try {
+    const r = await call("/items/catalog");
+    itemCatalog = r.items;
+    showShop();
+  } catch (e) {}
+}
+loadCatalog();
+
+const totalsCard = document.createElement("div");
+totalsCard.className = "inner";
+profileSec.insertBefore(totalsCard, profileSec.children[1]);
+
+function renderTotals(p) {
+  if (!p.totals) return;
+  const t = p.totals;
+  totalsCard.innerHTML = "";
+  const h = document.createElement("div");
+  h.style.marginBottom = "8px";
+  h.textContent = "Итоговые характеристики";
+  totalsCard.appendChild(h);
+
+  [
+    ["⚔️ Урон", t.damage],
+    ["🎯 Шанс крита", t.crit + "%"],
+    ["❤️ Макс. HP", t.max_hp],
+    ["🛡 Броня", t.armor],
+    ["💚 Регенерация", t.regen]
+  ].forEach(([name, val]) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;justify-content:space-between;padding:3px 0";
+    const a = document.createElement("span");
+    a.textContent = name;
+    const b = document.createElement("b");
+    b.textContent = val;
+    row.appendChild(a);
+    row.appendChild(b);
+    totalsCard.appendChild(row);
+  });
+}
+
+const baseShowTotals = show;
+show = function (p) {
+  baseShowTotals(p);
+  renderTotals(p);
+};
