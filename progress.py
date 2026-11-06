@@ -8,6 +8,7 @@ router = APIRouter()
 MAX_LEVEL = 50
 POINTS_PER_LEVEL = 3
 BASE_HP = 100
+BASE_DAMAGE = 1
 
 STAT_COLS = {
     "damage": "stat_damage",
@@ -45,6 +46,25 @@ def xp_needed(level: int) -> int:
     return round(100 * 1.1 ** (level - 1))
 
 
+def equipped_bonus(tid: int):
+    """Сумма урона, брони и HP от надетых предметов."""
+    rows = (
+        supabase.table("inventory")
+        .select("items(damage,armor,hp_bonus)")
+        .eq("telegram_id", tid)
+        .eq("equipped", True)
+        .execute()
+        .data
+    )
+    damage = armor = hp = 0
+    for r in rows:
+        it = r.get("items") or {}
+        damage += it.get("damage") or 0
+        armor += it.get("armor") or 0
+        hp += it.get("hp_bonus") or 0
+    return damage, armor, hp
+
+
 def build_player(tid: int):
     r = (
         supabase.table("players")
@@ -57,9 +77,12 @@ def build_player(tid: int):
         raise HTTPException(404, "Player not found")
 
     p = r.data[0]
+    eq_damage, eq_armor, eq_hp = equipped_bonus(tid)
+    max_hp = BASE_HP + int(PER_POINT["hp"] * p["stat_hp"]) + eq_hp
+
     p["max_level"] = MAX_LEVEL
     p["xp_to_next"] = xp_needed(p["level"]) if p["level"] < MAX_LEVEL else 0
-    p["max_hp"] = BASE_HP + PER_POINT["hp"] * p["stat_hp"]
+    p["max_hp"] = max_hp
     p["stats"] = {
         key: {
             "points": p[col],
@@ -67,6 +90,23 @@ def build_player(tid: int):
         }
         for key, col in STAT_COLS.items()
     }
+    p["totals"] = {
+        "damage": round(
+            BASE_DAMAGE + eq_damage + p["stat_damage"] * PER_POINT["damage"], 1
+        ),
+        "crit": round(p["stat_crit"] * PER_POINT["crit"], 1),
+        "max_hp": max_hp,
+        "armor": round(eq_armor + p["stat_armor"] * PER_POINT["armor"], 1),
+        "regen": round(p["stat_regen"] * PER_POINT["regen"], 1),
+    }
+
+    # Пока нет боя и лечения, HP всегда полный
+    if p["hp"] != max_hp:
+        supabase.table("players").update(
+            {"hp": max_hp}
+        ).eq("telegram_id", tid).execute()
+        p["hp"] = max_hp
+
     return p
 
 
@@ -123,6 +163,20 @@ def award_loot_xp(tid: int, loot: dict):
         print("XP ERROR:", repr(e))
 
 
+@router.get("/items/catalog")
+def items_catalog():
+    try:
+        r = (
+            supabase.table("items")
+            .select("id,name,type,slot,rarity,damage,armor,hp_bonus")
+            .execute()
+        )
+    except Exception as e:
+        print("CATALOG ERROR:", repr(e))
+        raise HTTPException(500, "Database error")
+    return {"items": {i["id"]: i for i in r.data}}
+
+
 @router.post("/profile/get")
 def profile_get(req: InitRequest):
     tid = verify_telegram_data(req.init_data)["id"]
@@ -150,7 +204,7 @@ def profile_spend(req: SpendRequest):
         for _ in range(5):
             r = (
                 supabase.table("players")
-                .select("stat_points,hp," + col)
+                .select("stat_points," + col)
                 .eq("telegram_id", tid)
                 .limit(1)
                 .execute()
@@ -162,16 +216,12 @@ def profile_spend(req: SpendRequest):
             if row["stat_points"] < req.amount:
                 raise HTTPException(400, "Не хватает очков")
 
-            changes = {
-                "stat_points": row["stat_points"] - req.amount,
-                col: row[col] + req.amount,
-            }
-            if req.stat == "hp":
-                changes["hp"] = row["hp"] + int(PER_POINT["hp"] * req.amount)
-
             ok = (
                 supabase.table("players")
-                .update(changes)
+                .update({
+                    "stat_points": row["stat_points"] - req.amount,
+                    col: row[col] + req.amount,
+                })
                 .eq("telegram_id", tid)
                 .eq("stat_points", row["stat_points"])
                 .eq(col, row[col])
