@@ -514,3 +514,12 @@ def js_file(name: str):
         media_type="application/javascript",
         headers={"Cache-Control": "no-store"},
     )
+# --- Опыт за добычу (новое) ---
+from progress import award_loot_xp  # noqa: E402
+
+_plain_add_items = add_items
+
+
+def add_items(tid, loot):  # noqa: F811
+    _plain_add_items(tid, loot)
+    award_loot_xp(tid, loot)
