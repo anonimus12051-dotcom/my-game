@@ -433,3 +433,12 @@ def shop_sell(request: ItemRequest):
 from rtp import router as rtp_router  # noqa: E402
 
 app.include_router(rtp_router)
+# --- Прокачка (новое) ---
+from progress import router as progress_router, build_player  # noqa: E402
+
+app.include_router(progress_router)
+
+
+def load_player(telegram_id: int):  # noqa: F811
+    """Новая версия: уровни, статы и максимум HP."""
+    return build_player(telegram_id)
