@@ -1,33 +1,35 @@
 const W = 360, H = 520;
-const canvas = document.getElementById("world");
+const canvas = $("world");
 const ctx = canvas.getContext("2d");
 const dpr = window.devicePixelRatio || 1;
 canvas.width = W * dpr;
 canvas.height = H * dpr;
 ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-const CLASS_COLORS = {fighter:"#d64545", rogue:"#7a4ad6", gatherer:"#3fae5a"};
-const ARROWS = {left:"⬅️", right:"➡️", up:"⬆️", down:"⬇️"};
+const CLASS_COLORS = {fighter: "#d64545", rogue: "#7a4ad6", gatherer: "#3fae5a"};
+const ARROWS = {left: "⬅️", right: "➡️", up: "⬆️", down: "⬇️"};
 
-let scene = "village";          // village | forest | lake
-const cam = {x:0, y:0};
+const me = {x: 180, y: 320, tx: null, ty: null, pending: null};
+const cam = {x: 0, y: 0};
+let scene = "village";            // village | forest | lake
 let forest = null;
-const lake = {phase:"idle", waitUntil:0};
+const lake = {phase: "idle", waitUntil: 0};
+let busy = false;
 
 const places = [
-  {id:"auction",  name:"Аукцион",  emoji:"⚖️", x:25,  y:35,  w:120, h:85, color:"#8a5a2b", roof:"#b33a3a", door:{x:85,  y:140}, title:"Аукцион"},
-  {id:"merchant", name:"Торговец", emoji:"🧑‍🌾", x:215, y:35,  w:120, h:85, color:"#2b6a8a", roof:"#2a9a6a", door:{x:275, y:140}, title:"Торговец"},
-  {id:"forge",    name:"Кузня",    emoji:"🔨", x:15,  y:225, w:95,  h:85, color:"#555",    roof:"#333",    door:{x:128, y:268}, title:"Кузня"},
-  {id:"mine",     name:"Шахта",    emoji:"⛏️", x:250, y:225, w:95,  h:85, color:"#6b5a4a", roof:"#3a2f26", door:{x:232, y:268}, title:"Шахта"},
-  {id:"gates",    name:"Ворота",   emoji:"🚪", x:120, y:440, w:120, h:70, color:"#7a7a7a", roof:"#444",    door:{x:180, y:425}, title:"Ворота"}
+  {id: "auction",  name: "Аукцион",  emoji: "⚖️", x: 25,  y: 35,  w: 120, h: 85, color: "#8a5a2b", roof: "#b33a3a", door: {x: 85,  y: 140}, title: "Аукцион"},
+  {id: "merchant", name: "Торговец", emoji: "🧑‍🌾", x: 215, y: 35,  w: 120, h: 85, color: "#2b6a8a", roof: "#2a9a6a", door: {x: 275, y: 140}, title: "Торговец"},
+  {id: "forge",    name: "Кузня",    emoji: "🔨", x: 15,  y: 225, w: 95,  h: 85, color: "#555",    roof: "#333",    door: {x: 128, y: 268}, title: "Кузня"},
+  {id: "mine",     name: "Шахта",    emoji: "⛏️", x: 250, y: 225, w: 95,  h: 85, color: "#6b5a4a", roof: "#3a2f26", door: {x: 232, y: 268}, title: "Шахта"},
+  {id: "gates",    name: "Ворота",   emoji: "🚪", x: 120, y: 440, w: 120, h: 70, color: "#7a7a7a", roof: "#444",    door: {x: 180, y: 425}, title: "Ворота"}
 ];
 
 function worldW() { return scene === "forest" ? forest.width : W; }
 function worldH() { return scene === "forest" ? forest.height : H; }
 
+/* ---------- движение и ввод ---------- */
 function openPlace(id) {
-  const p = places.find(x => x.id === id);
-  openSheet(id, p.title);
+  openSheet(id, places.find(p => p.id === id).title);
 }
 
 function go(x, y, pending) {
@@ -45,6 +47,7 @@ canvas.addEventListener("pointerdown", e => {
   const r = canvas.getBoundingClientRect();
   const x = (e.clientX - r.left) * W / r.width + cam.x;
   const y = (e.clientY - r.top) * H / r.height + cam.y;
+
   if (scene === "village") {
     const hit = places.find(p =>
       x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h);
@@ -64,14 +67,14 @@ function emoji(txt, x, y, size) {
 function drawPlayer() {
   ctx.fillStyle = "rgba(0,0,0,.3)";
   ctx.beginPath(); ctx.ellipse(me.x, me.y + 10, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = CLASS_COLORS[me.cls] || "#d64545";
+  ctx.fillStyle = CLASS_COLORS[hero.cls] || "#d64545";
   ctx.beginPath(); ctx.arc(me.x, me.y, 10, 0, Math.PI * 2); ctx.fill();
   ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
   ctx.fillStyle = "#fff";
   ctx.font = "bold 12px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText(me.name, me.x, me.y - 16);
+  ctx.fillText(hero.name, me.x, me.y - 16);
 }
 
 function drawVillage() {
@@ -83,8 +86,7 @@ function drawVillage() {
   ctx.fillRect(110, 245, 140, 50);
   ctx.fillRect(65, 120, 40, 40);
   ctx.fillRect(255, 120, 40, 40);
-  ctx.fillRect(65, 140, 140, 20);
-  ctx.fillRect(155, 140, 140, 20);
+  ctx.fillRect(65, 140, 230, 20);
 
   ctx.fillStyle = "#c9a66b";
   ctx.beginPath(); ctx.arc(180, 270, 48, 0, Math.PI * 2); ctx.fill();
@@ -123,7 +125,7 @@ function drawForest() {
   ctx.fillStyle = "#357535";
   for (let gx = 0; gx < forest.width; gx += 80) {
     for (let gy = 0; gy < forest.height; gy += 80) {
-      if (((gx / 80) + (gy / 80)) % 2 === 0) ctx.fillRect(gx, gy, 80, 80);
+      if ((gx / 80 + gy / 80) % 2 === 0) ctx.fillRect(gx, gy, 80, 80);
     }
   }
   ctx.strokeStyle = "#1c4a1c";
@@ -134,8 +136,7 @@ function drawForest() {
     emoji(forest.treasure.dug ? "🕳️" : "❓", forest.treasure.x, forest.treasure.y, 26);
   }
 
-  const trees = forest.trees.slice().sort((a, b) => a.y - b.y);
-  trees.forEach(t => {
+  forest.trees.slice().sort((a, b) => a.y - b.y).forEach(t => {
     if (t.felled) { emoji("🪵", t.x, t.y, 22); return; }
     emoji("🌲", t.x, t.y, 44);
     if (t.started) {
@@ -165,14 +166,12 @@ function drawLake() {
   [[90,350],[270,360]].forEach(([x, y]) => emoji("🪨", x, y, 22));
 
   if (lake.phase === "waiting" || lake.phase === "bite") {
-    const wob = Math.sin(performance.now() / 250) * 3;
-    emoji("🔴", 180, 190 + wob, 16);
+    emoji("🔴", 180, 190 + Math.sin(performance.now() / 250) * 3, 16);
   }
 
   drawPlayer();
 }
 
-/* ---------- цикл ---------- */
 let last = performance.now();
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000);
@@ -207,12 +206,9 @@ function frame(t) {
 requestAnimationFrame(frame);
 
 /* ---------- панель действий ---------- */
-const elActions = document.getElementById("actions");
-const elInfo = document.getElementById("sceneInfo");
-const bChop = document.getElementById("bChop");
-const bDig = document.getElementById("bDig");
-const bCast = document.getElementById("bCast");
-const bLeave = document.getElementById("bLeave");
+const bChop = $("bChop");
+const bDig = $("bDig");
+const bCast = $("bCast");
 
 function nearestTree() {
   let best = null, bd = 55;
@@ -230,7 +226,7 @@ function nearTreasure() {
 }
 
 function updateActions() {
-  elActions.classList.toggle("hidden", scene === "village");
+  $("actions").classList.toggle("hidden", scene === "village");
   if (scene === "village") return;
 
   bChop.classList.toggle("hidden", scene !== "forest");
@@ -241,48 +237,50 @@ function updateActions() {
     const t = nearestTree();
     let text = "Подойди к дереву (тапни по земле)";
     bChop.textContent = "🪓 Рубить";
-    if (t) {
-      if (t.started) {
-        const left = Math.max(0, Math.ceil((t.readyAt - Date.now()) / 1000));
-        text = "Дерево: удар " + t.hits + "/" + forest.hits +
-               (left > 0 ? " · следующий через " + left + " с" : " · можно рубить!");
-        if (left > 0) bChop.textContent = "🪓 Рубить (" + left + ")";
-      } else {
-        text = "Дерево рядом. Рубка займёт 60 секунд";
-        bChop.textContent = "🪓 Начать рубку";
-      }
+    if (t && t.started) {
+      const left = Math.max(0, Math.ceil((t.readyAt - Date.now()) / 1000));
+      text = "Дерево: удар " + t.hits + "/" + forest.hits +
+             (left > 0 ? " · следующий через " + left + " с" : " · можно рубить!");
+      if (left > 0) bChop.textContent = "🪓 Рубить (" + left + ")";
+    } else if (t) {
+      text = "Дерево рядом. Рубка займёт " + forest.hits * forest.gap + " секунд";
+      bChop.textContent = "🪓 Начать рубку";
     }
     if (nearTreasure()) text = "Здесь клад! Нужна лопата";
-    elInfo.textContent = text;
+    $("sceneInfo").textContent = text;
   } else {
     if (lake.phase === "idle") {
-      elInfo.textContent = "Забрось удочку: поклёвка через 20–60 секунд";
+      $("sceneInfo").textContent = "Забрось удочку: поклёвка через 20–60 секунд";
     } else if (lake.phase === "waiting") {
       const left = Math.max(0, Math.ceil((lake.waitUntil - Date.now()) / 1000));
-      elInfo.textContent = "Ждём поклёвку... " + left + " с";
+      $("sceneInfo").textContent = "Ждём поклёвку... " + left + " с";
     } else {
-      elInfo.textContent = "";
+      $("sceneInfo").textContent = "";
     }
     bCast.disabled = lake.phase !== "idle";
   }
 }
 setInterval(updateActions, 250);
 
-/* ---------- вход и выход ---------- */
+/* ---------- RTP: вход, возврат, выход ---------- */
 function enterScene(p) {
-  me.tx = null; me.pending = null;
+  me.tx = null;
+  me.pending = null;
+
   if (p.place === "forest") {
     scene = "forest";
     forest = {
-      width: p.width, height: p.height, hits: p.hits_needed,
+      width: p.width, height: p.height, hits: p.hits_needed, gap: p.gap,
       trees: p.trees, treasure: p.treasure
     };
     forest.trees.forEach(t => { t.readyAt = Date.now() + t.wait * 1000; });
-    me.x = p.start.x; me.y = p.start.y;
-  } else if (p.place === "lake") {
+    me.x = p.start.x;
+    me.y = p.start.y;
+  } else {
     scene = "lake";
-    me.x = 180; me.y = 390;
-    lake.phase = p.phase || "idle";
+    me.x = 180;
+    me.y = 390;
+    lake.phase = p.phase;
     if (lake.phase === "waiting") {
       lake.waitUntil = Date.now() + p.wait_left * 1000;
       scheduleBite();
@@ -293,7 +291,12 @@ function enterScene(p) {
 
 async function rtpGo() {
   try {
-    const res = await call("/rtp/go", {init_data: tg.initData});
+    const res = await call("/rtp/roll", {init_data: tg.initData});
+    if (res.place === "clearing") {
+      startFight(res);
+      setStatus("Тебя заметили мобы!");
+      return;
+    }
     enterScene(res);
     setStatus(res.place === "forest" ? "Ты попал в лес" : "Ты вышел к озеру");
   } catch (e) {
@@ -304,27 +307,33 @@ async function rtpGo() {
 async function restoreScene() {
   try {
     const res = await call("/rtp/current", {init_data: tg.initData});
-    if (res.place) enterScene(res);
+    if (res.dead) {
+      setStatus(res.message);
+      refreshProfile();
+    } else if (res.place === "clearing") {
+      startFight(res);
+    } else if (res.place) {
+      enterScene(res);
+    }
   } catch (e) {}
 }
 
-async function leaveScene() {
+$("bLeave").onclick = async () => {
   clearTimeout(biteTimer);
   clearInterval(fishTimer);
   fishInput = false;
-  document.getElementById("fishgame").classList.add("hidden");
-  document.getElementById("btnrow").classList.remove("hidden");
+  $("fishgame").classList.add("hidden");
+  $("btnrow").classList.remove("hidden");
   lake.phase = "idle";
   try { await call("/rtp/leave", {init_data: tg.initData}); } catch (e) {}
   scene = "village";
-  me.x = 180; me.y = 400; me.tx = null;
+  me.x = 180;
+  me.y = 400;
+  me.tx = null;
   updateActions();
-}
-bLeave.onclick = leaveScene;
+};
 
-/* ---------- лес: рубка и клад ---------- */
-let busy = false;
-
+/* ---------- лес ---------- */
 bChop.onclick = async () => {
   if (busy) return;
   const t = nearestTree();
@@ -339,8 +348,7 @@ bChop.onclick = async () => {
       {init_data: tg.initData, tree_id: t.id});
     Object.assign(t, res.tree);
     t.readyAt = Date.now() + res.tree.wait * 1000;
-    showInventory(res.inventory);
-    setStatus(res.message);
+    apply(res);
   } catch (e) {
     setStatus(e.message);
   }
@@ -353,15 +361,14 @@ bDig.onclick = async () => {
   try {
     const res = await call("/forest/dig", {init_data: tg.initData});
     forest.treasure = res.treasure;
-    showInventory(res.inventory);
-    setStatus(res.message);
+    apply(res);
   } catch (e) {
     setStatus(e.message);
   }
   busy = false;
 };
 
-/* ---------- озеро: рыбалка ---------- */
+/* ---------- озеро ---------- */
 let biteTimer = null;
 let biteTries = 0;
 let fishTimer = null;
@@ -383,8 +390,7 @@ bCast.onclick = async () => {
 
 function scheduleBite() {
   clearTimeout(biteTimer);
-  const ms = Math.max(0, lake.waitUntil - Date.now()) + 300;
-  biteTimer = setTimeout(doBite, ms);
+  biteTimer = setTimeout(doBite, Math.max(0, lake.waitUntil - Date.now()) + 300);
 }
 
 async function doBite() {
@@ -404,14 +410,10 @@ async function doBite() {
   }
 }
 
-function fishTitle(text) {
-  document.getElementById("fishTitle").textContent = text;
-}
-
 function fishProgress() {
   let s = "";
   for (let i = 0; i < fishSeq.length; i++) s += i < fishAns.length ? "● " : "○ ";
-  document.getElementById("fishProg").textContent = s;
+  $("fishProg").textContent = s;
 }
 
 function startMemory(res) {
@@ -419,19 +421,21 @@ function startMemory(res) {
   fishSeq = res.sequence;
   fishAns = [];
   fishInput = false;
-  document.getElementById("btnrow").classList.add("hidden");
-  document.getElementById("fishgame").classList.remove("hidden");
-  document.getElementById("fishPad").classList.add("hidden");
-  document.getElementById("fishProg").textContent = "";
-  document.getElementById("fishSeq").textContent =
-    fishSeq.map(d => ARROWS[d]).join(" ");
+  $("btnrow").classList.add("hidden");
+  $("fishgame").classList.remove("hidden");
+  $("fishPad").classList.add("hidden");
+  $("fishProg").textContent = "";
+  $("fishSeq").textContent = fishSeq.map(d => ARROWS[d]).join(" ");
 
   let left = res.show_seconds;
-  fishTitle("Клюёт! Запомни: " + left + " с");
+  $("fishTitle").textContent = "Клюёт! Запомни: " + left + " с";
   clearInterval(fishTimer);
   fishTimer = setInterval(() => {
     left--;
-    if (left > 0) { fishTitle("Клюёт! Запомни: " + left + " с"); return; }
+    if (left > 0) {
+      $("fishTitle").textContent = "Клюёт! Запомни: " + left + " с";
+      return;
+    }
     clearInterval(fishTimer);
     startInput(res.answer_seconds);
   }, 1000);
@@ -439,15 +443,15 @@ function startMemory(res) {
 
 function startInput(seconds) {
   fishInput = true;
-  document.getElementById("fishSeq").textContent = "";
-  document.getElementById("fishPad").classList.remove("hidden");
+  $("fishSeq").textContent = "";
+  $("fishPad").classList.remove("hidden");
   fishProgress();
 
   let left = seconds;
-  fishTitle("Повтори! Осталось " + left + " с");
+  $("fishTitle").textContent = "Повтори! Осталось " + left + " с";
   fishTimer = setInterval(() => {
     left--;
-    fishTitle("Повтори! Осталось " + left + " с");
+    $("fishTitle").textContent = "Повтори! Осталось " + left + " с";
     if (left <= 0) {
       clearInterval(fishTimer);
       finishFish();
@@ -469,21 +473,13 @@ document.querySelectorAll("#fishPad button").forEach(b => {
 
 async function finishFish() {
   fishInput = false;
-  document.getElementById("fishgame").classList.add("hidden");
-  document.getElementById("btnrow").classList.remove("hidden");
+  $("fishgame").classList.add("hidden");
+  $("btnrow").classList.remove("hidden");
   try {
-    const res = await call("/fish/finish",
-      {init_data: tg.initData, answer: fishAns});
-    showInventory(res.inventory);
-    setStatus(res.message);
+    apply(await call("/fish/finish",
+      {init_data: tg.initData, answer: fishAns}));
   } catch (e) {
     setStatus(e.message);
   }
   lake.phase = "idle";
-}
-
-const fightScript = document.createElement("script");
-fightScript.src = "/fight.js?v=11";
-fightScript.onload = start;
-fightScript.onerror = start;
-document.body.appendChild(fightScript);
+                             }
