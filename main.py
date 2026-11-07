@@ -442,3 +442,7 @@ app.include_router(progress_router)
 def load_player(telegram_id: int):  # noqa: F811
     """Новая версия: уровни, статы и максимум HP."""
     return build_player(telegram_id)
+# --- Бой на поляне (новое) ---
+from combat import router as combat_router  # noqa: E402
+
+app.include_router(combat_router)
