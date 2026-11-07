@@ -460,3 +460,28 @@ show = function (p) {
   baseShowTotals(p);
   renderTotals(p);
 };
+/* ---------- уклонение и лечение (дополнение) ---------- */
+STAT_DEFS.push(["evasion", "💨 Уклонение", "+0.3% за очко", v => v + "%"]);
+
+const baseShowEv = show;
+show = function (p) {
+  baseShowEv(p);
+  if (!p.totals) return;
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;justify-content:space-between;padding:3px 0";
+  const a = document.createElement("span");
+  a.textContent = "💨 Уклонение";
+  const b = document.createElement("b");
+  b.textContent = p.totals.evasion + "%";
+  row.appendChild(a);
+  row.appendChild(b);
+  totalsCard.appendChild(row);
+};
+
+const baseStatText = statText;
+statText = function (id) {
+  const base = baseStatText(id);
+  const it = itemCatalog[id];
+  if (it && it.heal) return (base ? base + " · " : "") + "лечит " + it.heal + " HP";
+  return base;
+};
