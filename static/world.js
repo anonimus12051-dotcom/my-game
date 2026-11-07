@@ -696,4 +696,54 @@ function updateDigBar() {
 function scheduleBoost() {
   clearTimeout(boostTimer);
   if (!digVein || digVein.done) return;
-  const delay = 7000 + Math.random()
+  const delay = 7000 + Math.random() * 8000; // 7–15 сек
+  boostTimer = setTimeout(() => {
+    if (digVein && !digVein.done) {
+      // случайная позиция кнопки
+      const btn = $("digBoostBtn");
+      btn.classList.remove("hidden");
+      btn.style.left = (20 + Math.random() * 60) + "%";
+      btn.style.top = (30 + Math.random() * 40) + "%";
+    }
+  }, delay);
+}
+
+$("digBoostBtn").onclick = async () => {
+  if (!digVein || digVein.done) return;
+  $("digBoostBtn").classList.add("hidden");
+  try {
+    const res = await call("/mine/boost", {init_data: tg.initData, vein_id: digVein.id});
+    Object.assign(digVein, res.vein);
+    const mv = mine.veins.find(x => x.id === digVein.id);
+    if (mv) Object.assign(mv, res.vein);
+    updateDigBar();
+    $("digInfo").textContent = res.message;
+    if (!digVein.done) scheduleBoost();
+  } catch (e) {
+    setStatus(e.message);
+  }
+};
+
+$("digClose").onclick = closeDig;
+$("digCollect").onclick = async () => {
+  if (!digVein || !digVein.done) return;
+  try {
+    const res = await call("/mine/collect", {init_data: tg.initData, vein_id: digVein.id});
+    Object.assign(digVein, res.vein);
+    digVein.collected = true;
+    const mv = mine.veins.find(x => x.id === digVein.id);
+    if (mv) { Object.assign(mv, res.vein); mv.collected = true; }
+    apply(res);
+    closeDig();
+  } catch (e) {
+    setStatus(e.message);
+  }
+};
+
+function closeDig() {
+  clearInterval(digTimer);
+  clearTimeout(boostTimer);
+  $("digRoot").classList.add("hidden");
+  digVein = null;
+}
+  
