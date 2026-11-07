@@ -71,9 +71,44 @@
   .inner .title { margin-bottom:8px; }
 
   /* панель действий в лесу и на озере */
-  #actions { position:fixed; left:0; right:0; bottom:0; z-index:20;
-         background:#272735; padding:10px 12px 14px; border-top:2px solid #444;
-         text-align:center; }
+  #actions <div id="actions" class="hidden">
+    <div id="sceneInfo"></div>
+    <div class="btnrow" id="btnrow">
+      <button id="bChop">🪓 Рубить</button>
+      <button id="bDig" class="hidden">⛏ Копать клад</button>
+      <button id="bCast" class="hidden">🎣 Забросить</button>
+      <button id="bMineDig" class="hidden">⛏️ Копать</button>
+      <button id="bLeave" class="gray">🏠 На спавн</button>
+    </div>
+    <div id="fishgame" class="hidden">
+      <div id="fishTitle"></div>
+      <div id="fishSeq"></div>
+      <div id="fishProg"></div>
+      <div id="fishPad" class="pad hidden">
+        <button data-d="up" style="grid-column:2;grid-row:1">⬆️</button>
+        <button data-d="left" style="grid-column:1;grid-row:2">⬅️</button>
+        <button data-d="down" style="grid-column:2;grid-row:2">⬇️</button>
+        <button data-d="right" style="grid-column:3;grid-row:2">➡️</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- окно копания шахты -->
+  <div id="digRoot" class="hidden" style="position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;">
+    <div style="background:#272735;width:90%;max-width:320px;border-radius:16px;padding:16px;position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <b id="digTitle">🪨 Камень</b>
+        <button id="digClose" style="background:none;border:none;color:#eee;font-size:22px;">✕</button>
+      </div>
+      <div id="digInfo" style="font-size:13px;color:#aaa;margin-bottom:10px;min-height:18px;">...</div>
+      <div style="height:18px;background:#111;border-radius:9px;overflow:hidden;margin-bottom:6px;">
+        <div id="digFill" style="height:100%;width:0%;background:#f5c542;"></div>
+      </div>
+      <div id="digTime" style="text-align:center;font-size:14px;margin-bottom:12px;">—</div>
+      <button id="digCollect" class="big" style="margin-bottom:0;">📦 Забрать добычу</button>
+      <button id="digBoostBtn" class="hidden" style="position:absolute;padding:10px 14px;border:none;border-radius:8px;background:#3a9d5d;color:#fff;font-weight:bold;font-size:14px;">⚡ Ускорить</button>
+    </div>
+  </div>
   #sceneInfo { font-size:14px; margin-bottom:8px; min-height:18px; }
   .btnrow { display:flex; gap:8px; }
   .btnrow button { flex:1; padding:12px 6px; border:none; border-radius:8px;
@@ -107,6 +142,7 @@
   .frow button { padding:14px; border:none; border-radius:8px; font-weight:bold; font-size:16px; }
   #fAttack { flex:2; background:#f5c542; color:#111; }
   #fFlee { flex:1; background:#444; color:#eee; }
+  #digBoostBtn { z-index: 5; }
 </style>
 </head>
 <body>
@@ -240,7 +276,10 @@
     </div>
   </div>
 
-<script src="/js/ui.js?v=13"></script>
+<script src="/js/ui.js?v=14"></script>
+<script src="/js/world.js?v=14"></script>
+<script src="/js/fight.js?v=14"></script>
+<script>start();</script>
 <script src="/js/world.js?v=13"></script>
 <script src="/js/fight.js?v=13"></script>
 <script>start();</script>
