@@ -482,4 +482,8 @@ async function finishFish() {
   lake.phase = "idle";
 }
 
-start();
+const fightScript = document.createElement("script");
+fightScript.src = "/fight.js?v=11";
+fightScript.onload = start;
+fightScript.onerror = start;
+document.body.appendChild(fightScript);
