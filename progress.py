@@ -16,6 +16,7 @@ STAT_COLS = {
     "hp": "stat_hp",
     "armor": "stat_armor",
     "regen": "stat_regen",
+    "evasion": "stat_evasion",
 }
 PER_POINT = {
     "damage": 0.5,
@@ -23,11 +24,13 @@ PER_POINT = {
     "hp": 3,
     "armor": 0.5,
     "regen": 0.5,
+    "evasion": 0.3,
 }
 
 FIELDS = (
     "telegram_id,username,first_name,photo_url,balance,level,xp,hp,"
-    "class,stat_points,stat_damage,stat_crit,stat_hp,stat_armor,stat_regen"
+    "class,stat_points,stat_damage,stat_crit,stat_hp,stat_armor,"
+    "stat_regen,stat_evasion"
 )
 
 
@@ -98,9 +101,10 @@ def build_player(tid: int):
         "max_hp": max_hp,
         "armor": round(eq_armor + p["stat_armor"] * PER_POINT["armor"], 1),
         "regen": round(p["stat_regen"] * PER_POINT["regen"], 1),
+        "evasion": round(p["stat_evasion"] * PER_POINT["evasion"], 1),
     }
 
-    # Пока нет боя и лечения, HP всегда полный
+    # Вне боя HP всегда полный
     if p["hp"] != max_hp:
         supabase.table("players").update(
             {"hp": max_hp}
@@ -168,7 +172,7 @@ def items_catalog():
     try:
         r = (
             supabase.table("items")
-            .select("id,name,type,slot,rarity,damage,armor,hp_bonus")
+            .select("id,name,type,slot,rarity,damage,armor,hp_bonus,heal")
             .execute()
         )
     except Exception as e:
