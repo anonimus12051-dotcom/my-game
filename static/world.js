@@ -11,8 +11,9 @@ const ARROWS = {left: "⬅️", right: "➡️", up: "⬆️", down: "⬇️"};
 
 const me = {x: 180, y: 320, tx: null, ty: null, pending: null};
 const cam = {x: 0, y: 0};
-let scene = "village";            // village | forest | lake
+let scene = "village";            // village | forest | lake | mine
 let forest = null;
+let mine = null;
 const lake = {phase: "idle", waitUntil: 0};
 let busy = false;
 
@@ -24,11 +25,23 @@ const places = [
   {id: "gates",    name: "Ворота",   emoji: "🚪", x: 120, y: 440, w: 120, h: 70, color: "#7a7a7a", roof: "#444",    door: {x: 180, y: 425}, title: "Ворота"}
 ];
 
-function worldW() { return scene === "forest" ? forest.width : W; }
-function worldH() { return scene === "forest" ? forest.height : H; }
+function worldW() {
+  if (scene === "forest") return forest.width;
+  if (scene === "mine") return mine.width;
+  return W;
+}
+function worldH() {
+  if (scene === "forest") return forest.height;
+  if (scene === "mine") return mine.height;
+  return H;
+}
 
 /* ---------- движение и ввод ---------- */
 function openPlace(id) {
+  if (id === "mine") {
+    enterMine();
+    return;
+  }
   openSheet(id, places.find(p => p.id === id).title);
 }
 
@@ -172,6 +185,68 @@ function drawLake() {
   drawPlayer();
 }
 
+function drawMine() {
+  // тёмный фон пещеры
+  ctx.fillStyle = "#1a1a22";
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  // стены
+  ctx.fillStyle = "#2a2a35";
+  ctx.fillRect(0, 0, mine.width, mine.height);
+
+  // пол
+  ctx.fillStyle = "#22222c";
+  for (let gx = 0; gx < mine.width; gx += 60) {
+    for (let gy = 0; gy < mine.height; gy += 60) {
+      if ((gx / 60 + gy / 60) % 2 === 0) ctx.fillRect(gx, gy, 60, 60);
+    }
+  }
+
+  // выход (верх центр)
+  ctx.fillStyle = "#3a2f26";
+  ctx.fillRect(mine.width / 2 - 50, 20, 100, 50);
+  ctx.fillStyle = "#1a1a22";
+  ctx.beginPath();
+  ctx.ellipse(mine.width / 2, 70, 40, 18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  emoji("🚪", mine.width / 2, 45, 28);
+  ctx.fillStyle = "#aaa";
+  ctx.font = "bold 12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Выход", mine.width / 2, 95);
+
+  // лифт (закрыт)
+  ctx.fillStyle = "#333";
+  ctx.fillRect(mine.width / 2 + 70, 25, 55, 55);
+  ctx.fillStyle = "#555";
+  ctx.fillRect(mine.width / 2 + 78, 33, 39, 39);
+  emoji("🛗", mine.width / 2 + 97, 52, 22);
+  ctx.fillStyle = "#888";
+  ctx.font = "10px sans-serif";
+  ctx.fillText("Скоро", mine.width / 2 + 97, 90);
+
+  // жилы
+  mine.veins.forEach(v => {
+    if (v.done && v.collected) return;
+    const alpha = v.done ? 0.5 : 1;
+    ctx.globalAlpha = alpha;
+    emoji(v.emoji, v.x, v.y, 32);
+    if (v.started && !v.done) {
+      // мини-полоска
+      ctx.fillStyle = "#000";
+      ctx.fillRect(v.x - 18, v.y - 28, 36, 5);
+      ctx.fillStyle = "#f5c542";
+      ctx.fillRect(v.x - 18, v.y - 28, 36 * v.progress, 5);
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  drawPlayer();
+  ctx.restore();
+}
+
 let last = performance.now();
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000);
@@ -199,6 +274,7 @@ function frame(t) {
 
   if (scene === "village") drawVillage();
   else if (scene === "forest") drawForest();
+  else if (scene === "mine") drawMine();
   else drawLake();
 
   requestAnimationFrame(frame);
@@ -209,6 +285,7 @@ requestAnimationFrame(frame);
 const bChop = $("bChop");
 const bDig = $("bDig");
 const bCast = $("bCast");
+const bMineDig = $("bMineDig");
 
 function nearestTree() {
   let best = null, bd = 55;
@@ -216,6 +293,17 @@ function nearestTree() {
     if (t.felled) continue;
     const d = Math.hypot(t.x - me.x, t.y - me.y);
     if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+
+function nearestVein() {
+  if (!mine) return null;
+  let best = null, bd = 55;
+  for (const v of mine.veins) {
+    if (v.done && v.collected) continue;
+    const d = Math.hypot(v.x - me.x, v.y - me.y);
+    if (d < bd) { bd = d; best = v; }
   }
   return best;
 }
@@ -232,6 +320,7 @@ function updateActions() {
   bChop.classList.toggle("hidden", scene !== "forest");
   bDig.classList.toggle("hidden", scene !== "forest" || !nearTreasure());
   bCast.classList.toggle("hidden", scene !== "lake");
+  bMineDig.classList.toggle("hidden", scene !== "mine");
 
   if (scene === "forest") {
     const t = nearestTree();
@@ -248,6 +337,26 @@ function updateActions() {
     }
     if (nearTreasure()) text = "Здесь клад! Нужна лопата";
     $("sceneInfo").textContent = text;
+  } else if (scene === "mine") {
+    const v = nearestVein();
+    if (!v) {
+      $("sceneInfo").textContent = "Все жилы выкопаны. Можно выйти";
+      bMineDig.textContent = "⛏️ Копать";
+      bMineDig.disabled = true;
+    } else if (v.done) {
+      $("sceneInfo").textContent = v.name + " готова! Забери добычу";
+      bMineDig.textContent = "📦 Забрать";
+      bMineDig.disabled = false;
+    } else if (v.started) {
+      const sec = Math.ceil(v.left);
+      $("sceneInfo").textContent = "Копается " + v.name + " · осталось \~" + sec + " с";
+      bMineDig.textContent = "⛏️ Открыть";
+      bMineDig.disabled = false;
+    } else {
+      $("sceneInfo").textContent = "Рядом: " + v.name + ". Нажми «Копать»";
+      bMineDig.textContent = "⛏️ Копать";
+      bMineDig.disabled = false;
+    }
   } else {
     if (lake.phase === "idle") {
       $("sceneInfo").textContent = "Забрось удочку: поклёвка через 20–60 секунд";
@@ -276,6 +385,15 @@ function enterScene(p) {
     forest.trees.forEach(t => { t.readyAt = Date.now() + t.wait * 1000; });
     me.x = p.start.x;
     me.y = p.start.y;
+  } else if (p.place === "mine") {
+    scene = "mine";
+    mine = {
+      width: p.width,
+      height: p.height,
+      veins: p.veins
+    };
+    me.x = p.start.x;
+    me.y = p.start.y;
   } else {
     scene = "lake";
     me.x = 180;
@@ -287,6 +405,16 @@ function enterScene(p) {
     }
   }
   updateActions();
+}
+
+async function enterMine() {
+  try {
+    const res = await call("/mine/enter", {init_data: tg.initData});
+    enterScene(res);
+    setStatus("Ты вошёл в шахту");
+  } catch (e) {
+    setStatus(e.message);
+  }
 }
 
 async function rtpGo() {
@@ -330,6 +458,7 @@ $("bLeave").onclick = async () => {
   me.x = 180;
   me.y = 400;
   me.tx = null;
+  mine = null;
   updateActions();
 };
 
@@ -366,6 +495,29 @@ bDig.onclick = async () => {
     setStatus(e.message);
   }
   busy = false;
+};
+
+/* ---------- шахта ---------- */
+bMineDig.onclick = async () => {
+  const v = nearestVein();
+  if (!v) return;
+
+  if (v.done) {
+    // забрать
+    try {
+      const res = await call("/mine/collect", {init_data: tg.initData, vein_id: v.id});
+      Object.assign(v, res.vein);
+      v.collected = true;
+      apply(res);
+      closeDig();
+    } catch (e) {
+      setStatus(e.message);
+    }
+    return;
+  }
+
+  // открыть окно копания
+  openDig(v);
 };
 
 /* ---------- озеро ---------- */
@@ -482,4 +634,66 @@ async function finishFish() {
     setStatus(e.message);
   }
   lake.phase = "idle";
-                             }
+}
+
+/* ---------- окно копания шахты ---------- */
+let digVein = null;
+let digTimer = null;
+let boostTimer = null;
+
+function openDig(v) {
+  digVein = v;
+  $("digRoot").classList.remove("hidden");
+  $("digTitle").textContent = v.emoji + " " + v.name;
+  $("digBoostBtn").classList.add("hidden");
+  updateDigBar();
+
+  // если ещё не начато — стартуем
+  if (!v.started) {
+    call("/mine/start", {init_data: tg.initData, vein_id: v.id})
+      .then(res => {
+        Object.assign(v, res.vein);
+        $("digInfo").textContent = res.message + " (ускорение " + (res.boost_percent || 10) + "%)";
+        scheduleBoost();
+      })
+      .catch(e => setStatus(e.message));
+  } else {
+    $("digInfo").textContent = "Копается...";
+    scheduleBoost();
+  }
+
+  clearInterval(digTimer);
+  digTimer = setInterval(async () => {
+    try {
+      const res = await call("/mine/state", {init_data: tg.initData});
+      const updated = res.veins.find(x => x.id === v.id);
+      if (updated) {
+        Object.assign(v, updated);
+        // обновить и в mine.veins
+        const mv = mine.veins.find(x => x.id === v.id);
+        if (mv) Object.assign(mv, updated);
+        updateDigBar();
+        if (v.done) {
+          $("digInfo").textContent = "Готово! Можно забрать";
+          $("digBoostBtn").classList.add("hidden");
+          clearInterval(digTimer);
+          clearTimeout(boostTimer);
+        }
+      }
+    } catch (e) {}
+  }, 1000);
+}
+
+function updateDigBar() {
+  if (!digVein) return;
+  const pct = Math.min(100, (1 - digVein.left / digVein.total) * 100);
+  $("digFill").style.width = pct + "%";
+  $("digTime").textContent = digVein.done
+    ? "Готово!"
+    : Math.ceil(digVein.left) + " с";
+}
+
+function scheduleBoost() {
+  clearTimeout(boostTimer);
+  if (!digVein || digVein.done) return;
+  const delay = 7000 + Math.random()
