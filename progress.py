@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from main import supabase, verify_telegram_data
+from core import InitRequest, safe, supabase, user_id
 
 router = APIRouter()
 
@@ -9,6 +9,7 @@ MAX_LEVEL = 50
 POINTS_PER_LEVEL = 3
 BASE_HP = 100
 BASE_DAMAGE = 1
+CLASSES = ("fighter", "rogue", "gatherer")
 
 STAT_COLS = {
     "damage": "stat_damage",
@@ -34,8 +35,9 @@ FIELDS = (
 )
 
 
-class InitRequest(BaseModel):
+class ClassRequest(BaseModel):
     init_data: str
+    player_class: str
 
 
 class SpendRequest(BaseModel):
@@ -167,35 +169,30 @@ def award_loot_xp(tid: int, loot: dict):
         print("XP ERROR:", repr(e))
 
 
-@router.get("/items/catalog")
-def items_catalog():
-    try:
-        r = (
-            supabase.table("items")
-            .select("id,name,type,slot,rarity,damage,armor,hp_bonus,heal")
-            .execute()
-        )
-    except Exception as e:
-        print("CATALOG ERROR:", repr(e))
-        raise HTTPException(500, "Database error")
-    return {"items": {i["id"]: i for i in r.data}}
-
-
 @router.post("/profile/get")
+@safe
 def profile_get(req: InitRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-    try:
-        return {"player": build_player(tid)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print("PROFILE ERROR:", repr(e))
-        raise HTTPException(500, "Database error")
+    tid = user_id(req.init_data)
+    return {"player": build_player(tid)}
+
+
+@router.post("/profile/class")
+@safe
+def profile_class(req: ClassRequest):
+    tid = user_id(req.init_data)
+    if req.player_class not in CLASSES:
+        raise HTTPException(400, "Unknown class")
+
+    supabase.table("players").update(
+        {"class": req.player_class}
+    ).eq("telegram_id", tid).execute()
+    return {"player": build_player(tid)}
 
 
 @router.post("/profile/spend")
+@safe
 def profile_spend(req: SpendRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
+    tid = user_id(req.init_data)
 
     if req.stat not in STAT_COLS:
         raise HTTPException(400, "Неизвестная характеристика")
@@ -204,39 +201,33 @@ def profile_spend(req: SpendRequest):
 
     col = STAT_COLS[req.stat]
 
-    try:
-        for _ in range(5):
-            r = (
-                supabase.table("players")
-                .select("stat_points," + col)
-                .eq("telegram_id", tid)
-                .limit(1)
-                .execute()
-            )
-            if not r.data:
-                raise HTTPException(404, "Player not found")
-            row = r.data[0]
+    for _ in range(5):
+        r = (
+            supabase.table("players")
+            .select("stat_points," + col)
+            .eq("telegram_id", tid)
+            .limit(1)
+            .execute()
+        )
+        if not r.data:
+            raise HTTPException(404, "Player not found")
+        row = r.data[0]
 
-            if row["stat_points"] < req.amount:
-                raise HTTPException(400, "Не хватает очков")
+        if row["stat_points"] < req.amount:
+            raise HTTPException(400, "Не хватает очков")
 
-            ok = (
-                supabase.table("players")
-                .update({
-                    "stat_points": row["stat_points"] - req.amount,
-                    col: row[col] + req.amount,
-                })
-                .eq("telegram_id", tid)
-                .eq("stat_points", row["stat_points"])
-                .eq(col, row[col])
-                .execute()
-            )
-            if ok.data:
-                return {"status": "success", "player": build_player(tid)}
+        ok = (
+            supabase.table("players")
+            .update({
+                "stat_points": row["stat_points"] - req.amount,
+                col: row[col] + req.amount,
+            })
+            .eq("telegram_id", tid)
+            .eq("stat_points", row["stat_points"])
+            .eq(col, row[col])
+            .execute()
+        )
+        if ok.data:
+            return {"player": build_player(tid)}
 
-        raise HTTPException(409, "Попробуй ещё раз")
-    except HTTPException:
-        raise
-    except Exception as e:
-        print("SPEND ERROR:", repr(e))
-        raise HTTPException(500, "Database error")
+    raise HTTPException(409, "Попробуй ещё раз")
