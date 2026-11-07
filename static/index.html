@@ -1,265 +1,274 @@
-const fight = {
-  active: false, mobs: [], cards: {}, php: 0, pmax: 0, selected: null,
-  readyAt: 0, healReadyAt: 0, done: false, gainXp: 0, gainSilver: 0,
-  log: [], seen: new Set(), healBtns: []
-};
-let fightPoll = null;
-let fightTick = null;
-let fBusy = false;
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Моя игра</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body { margin:0; padding:12px 12px 150px; font-family:sans-serif;
+         background:#1b1b24; color:#eee; }
+  button:disabled { opacity:.5; }
+  .hidden { display:none !important; }
 
-function logLine(text) {
-  fight.log.unshift(text);
-  fight.log = fight.log.slice(0, 6);
-  $("fLog").textContent = fight.log.join("\n");
-}
+  .top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  #avatar { width:44px; height:44px; border-radius:50%; background:#444; object-fit:cover; }
+  .top .info { flex:1; }
+  #profileBtn { padding:10px 14px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; }
+  #world { display:block; margin:0 auto; border-radius:12px; touch-action:none;
+         width:min(100%, calc((100vh - 220px) * 0.6923)); height:auto; }
 
-function isAlive(id) {
-  return fight.mobs.some(m => m.id === id && m.hp > 0);
-}
+  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%);
+         background:#f5c542; color:#111; padding:8px 14px; border-radius:8px;
+         font-size:14px; z-index:100; max-width:90%; text-align:center; }
 
-/* ---------- карточки мобов (создаются один раз) ---------- */
-function buildMobs(mobs) {
-  const box = $("fMobs");
-  box.innerHTML = "";
-  fight.cards = {};
+  .bar { height:14px; background:#111; border-radius:7px; overflow:hidden; margin:4px 0 10px; }
+  .fill { height:100%; }
+  #hpFill { background:#d64545; }
+  #xpFill { background:#4a90e2; }
 
-  mobs.forEach(m => {
-    const card = el("div", "mobcard");
-    const em = el("div", "em", m.emoji);
-    const bar = el("div", "bar");
-    const fill = el("div", "fill");
-    fill.style.background = "#d64545";
-    bar.appendChild(fill);
-    const hp = el("div", "hp");
+  .tabs, .classes, .cats { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button, .classes button, .cats button {
+         flex:1; padding:10px 4px; border:2px solid #444;
+         background:#1b1b24; color:#eee; border-radius:8px; font-size:14px; }
+  .tabs button.active, .classes button.active, .cats button.active {
+         border-color:#f5c542; color:#f5c542; }
 
-    card.appendChild(em);
-    card.appendChild(el("div", "nm", m.name));
-    card.appendChild(bar);
-    card.appendChild(hp);
-    card.onclick = () => {
-      if (isAlive(m.id)) { fight.selected = m.id; updateMobs(); }
-    };
+  .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .slot { aspect-ratio:1; background:#1b1b24; border:1px dashed #555;
+         border-radius:8px; display:flex; align-items:center;
+         justify-content:center; font-size:10px; color:#888;
+         text-align:center; padding:2px; word-break:break-word; }
+  .slot.full { border:2px solid #888; color:#eee; }
+  .slot.on { border-color:#f5c542; }
+  .del .slot.full { border-color:#d64545; }
 
-    fight.cards[m.id] = {card: card, em: em, fill: fill, hp: hp, emoji: m.emoji};
-    box.appendChild(card);
-  });
-}
+  .line { display:flex; justify-content:space-between; padding:3px 0; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         padding:10px 0; border-bottom:1px solid #333; gap:8px; }
+  .row:last-child { border-bottom:none; }
+  .row small { color:#aaa; }
+  .row button, .big { padding:8px 14px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; }
+  .big { display:block; width:100%; padding:14px; margin-bottom:10px; font-size:15px; }
+  .small { width:100%; margin-top:8px; padding:8px; border:2px solid #444;
+         background:#1b1b24; color:#eee; border-radius:8px; }
+  .small.danger { border-color:#d64545; color:#ff8a8a; }
+  .uncommon { color:#6fd16f; }
+  .hint { color:#888; font-size:12px; margin-top:6px; }
 
-function updateMobs() {
-  fight.mobs.forEach(m => {
-    const c = fight.cards[m.id];
-    const dead = m.hp <= 0;
-    c.em.textContent = dead ? "💀" : c.emoji;
-    c.fill.style.width = Math.max(0, m.hp / m.max_hp * 100) + "%";
-    c.hp.textContent = dead ? "побеждён" : Math.ceil(m.hp) + " / " + m.max_hp;
-    c.card.classList.toggle("dead", dead);
-    c.card.classList.toggle("sel", fight.selected === m.id && !dead);
-  });
-}
+  /* окна */
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.55);
+         z-index:50; display:flex; align-items:flex-end; }
+  #sheet { background:#272735; width:100%; max-height:82vh; overflow-y:auto;
+         border-radius:16px 16px 0 0; padding:14px; box-sizing:border-box; }
+  .sheetHead { display:flex; justify-content:space-between;
+         align-items:center; margin-bottom:12px; font-size:18px; }
+  #sheetClose { background:none; border:none; color:#eee; font-size:22px; }
+  .inner { background:#1b1b24; border-radius:12px; padding:12px; margin-bottom:12px; }
+  .inner .title { margin-bottom:8px; }
 
-function updatePlayer() {
-  $("fPhp").textContent = Math.ceil(fight.php) + " / " + fight.pmax;
-  $("fPhpFill").style.width = Math.min(100, fight.php / fight.pmax * 100) + "%";
-}
+  /* панель действий в лесу и на озере */
+  #actions { position:fixed; left:0; right:0; bottom:0; z-index:20;
+         background:#272735; padding:10px 12px 14px; border-top:2px solid #444;
+         text-align:center; }
+  #sceneInfo { font-size:14px; margin-bottom:8px; min-height:18px; }
+  .btnrow { display:flex; gap:8px; }
+  .btnrow button { flex:1; padding:12px 6px; border:none; border-radius:8px;
+         background:#f5c542; color:#111; font-weight:bold; font-size:14px; }
+  .btnrow button.gray { background:#444; color:#eee; }
+  #fishTitle { font-size:15px; margin-bottom:6px; }
+  #fishSeq { font-size:28px; min-height:40px; letter-spacing:4px; }
+  #fishProg { font-size:18px; letter-spacing:4px; margin:4px 0 8px; min-height:22px; }
+  .pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+         max-width:240px; margin:0 auto; }
+  .pad button { padding:12px; font-size:22px; border:none; border-radius:8px; background:#3a3a4e; }
 
-/* ---------- лечение ---------- */
-function renderHeal() {
-  const box = $("fHeal");
-  box.innerHTML = "";
-  fight.healBtns = [];
+  /* бой */
+  #fightRoot { position:fixed; inset:0; z-index:45; background:#2f6b2f;
+         overflow-y:auto; padding:14px; box-sizing:border-box; color:#fff; }
+  .ftitle { font-size:18px; font-weight:bold; margin-bottom:10px; }
+  #fMobs { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin:14px 0; }
+  .mobcard { width:100px; padding:8px; border-radius:12px; text-align:center;
+         background:#272735; border:3px solid #444; }
+  .mobcard.sel { border-color:#f5c542; }
+  .mobcard.dead { opacity:.45; background:#1f3f1f; }
+  .mobcard .em { font-size:44px; }
+  .mobcard .nm { font-size:12px; }
+  .mobcard .hp { font-size:11px; }
+  .mobcard .bar { margin:6px 0 2px; }
+  #fLog { min-height:90px; font-size:13px; text-align:center; line-height:1.5; white-space:pre-line; }
+  #fHeal { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+  #fHeal button { flex:1; min-width:120px; padding:10px 6px; border:none;
+         border-radius:8px; background:#3a9d5d; color:#fff; font-weight:bold; font-size:13px; }
+  .frow { display:flex; gap:8px; }
+  .frow button { padding:14px; border:none; border-radius:8px; font-weight:bold; font-size:16px; }
+  #fAttack { flex:2; background:#f5c542; color:#111; }
+  #fFlee { flex:1; background:#444; color:#eee; }
 
-  const groups = {};
-  inventory.filter(r => r.items.type === "heal").forEach(r => {
-    const g = groups[r.items.id] ||
-      (groups[r.items.id] = {row: r, name: r.items.name, id: r.items.id, count: 0});
-    g.count += r.qty;
-  });
+  /* окно копания шахты */
+  #digRoot { position:fixed; inset:0; z-index:40; background:rgba(0,0,0,.75);
+         display:flex; align-items:center; justify-content:center; }
+  #digBox { background:#272735; width:90%; max-width:320px; border-radius:16px;
+         padding:16px; position:relative; }
+  #digBoostBtn { position:absolute; padding:10px 14px; border:none; border-radius:8px;
+         background:#3a9d5d; color:#fff; font-weight:bold; font-size:14px; z-index:5; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <img id="avatar" alt="">
+    <div class="info">
+      <div id="name" style="font-weight:bold">...</div>
+      <div id="silver">Серебро: 0</div>
+    </div>
+    <button id="profileBtn">Профиль</button>
+  </div>
 
-  const list = Object.values(groups);
-  if (!list.length) {
-    box.appendChild(el("div", "", "Нет лечебных предметов. Их можно купить у торговца"));
-    return;
-  }
+  <canvas id="world"></canvas>
+  <div id="toast" class="hidden"></div>
 
-  list.forEach(g => {
-    const info = itemCatalog[g.id];
-    const label = "🩹 " + g.name + " x" + g.count +
-                  (info && info.heal ? " (+" + info.heal + ")" : "");
-    const btn = el("button", "", label);
-    btn.onclick = () => useHeal(g.row.id);
-    box.appendChild(btn);
-    fight.healBtns.push({btn: btn, label: label});
-  });
-}
+  <div id="actions" class="hidden">
+    <div id="sceneInfo"></div>
+    <div class="btnrow" id="btnrow">
+      <button id="bChop">🪓 Рубить</button>
+      <button id="bDig" class="hidden">⛏ Копать клад</button>
+      <button id="bCast" class="hidden">🎣 Забросить</button>
+      <button id="bMineDig" class="hidden">⛏️ Копать</button>
+      <button id="bLeave" class="gray">🏠 На спавн</button>
+    </div>
+    <div id="fishgame" class="hidden">
+      <div id="fishTitle"></div>
+      <div id="fishSeq"></div>
+      <div id="fishProg"></div>
+      <div id="fishPad" class="pad hidden">
+        <button data-d="up" style="grid-column:2;grid-row:1">⬆️</button>
+        <button data-d="left" style="grid-column:1;grid-row:2">⬅️</button>
+        <button data-d="down" style="grid-column:2;grid-row:2">⬇️</button>
+        <button data-d="right" style="grid-column:3;grid-row:2">➡️</button>
+      </div>
+    </div>
+  </div>
 
-async function useHeal(invId) {
-  if (fBusy) return;
-  fBusy = true;
-  try {
-    const res = await call("/fight/heal",
-      {init_data: tg.initData, inv_id: invId});
-    if (res.dead) {
-      onDeath(res);
-    } else {
-      applyView(res);
-      logLine("🩹 " + res.healed.name + ": +" + res.healed.amount + " HP");
-      showInventory(res.inventory);
-      renderHeal();
-    }
-  } catch (e) {
-    if (e.message === "Ты сейчас не здесь") closeFight();
-    else logLine("⚠️ " + e.message);
-  }
-  fBusy = false;
-}
+  <!-- окно копания шахты -->
+  <div id="digRoot" class="hidden">
+    <div id="digBox">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <b id="digTitle">🪨 Камень</b>
+        <button id="digClose" style="background:none;border:none;color:#eee;font-size:22px;">✕</button>
+      </div>
+      <div id="digInfo" style="font-size:13px;color:#aaa;margin-bottom:10px;min-height:18px;">...</div>
+      <div style="height:18px;background:#111;border-radius:9px;overflow:hidden;margin-bottom:6px;">
+        <div id="digFill" style="height:100%;width:0%;background:#f5c542;"></div>
+      </div>
+      <div id="digTime" style="text-align:center;font-size:14px;margin-bottom:12px;">—</div>
+      <button id="digCollect" class="big" style="margin-bottom:0;">📦 Забрать добычу</button>
+      <button id="digBoostBtn" class="hidden">⚡ Ускорить</button>
+    </div>
+  </div>
 
-/* ---------- состояние боя ---------- */
-function applyView(v) {
-  const now = Date.now();
+  <div id="fightRoot" class="hidden">
+    <div class="ftitle">⚔️ Поляна с мобами</div>
+    <div>Твоё HP: <b id="fPhp"></b></div>
+    <div class="bar"><div class="fill" id="fPhpFill" style="background:#d64545"></div></div>
+    <div id="fMobs"></div>
+    <div id="fLog"></div>
+    <div id="fHeal"></div>
+    <div class="frow">
+      <button id="fAttack">⚔️ Атаковать</button>
+      <button id="fFlee">🏃 Бежать</button>
+    </div>
+  </div>
 
-  (v.events || []).forEach(ev => {
-    if (fight.seen.has(ev.id)) return;
-    fight.seen.add(ev.id);
-    if (!fight.active) return;
-    logLine(ev.hit
-      ? "💢 " + ev.mob + " ударил: -" + ev.dmg
-      : "🌀 " + ev.mob + " промахнулся");
-  });
+  <div id="overlay" class="hidden">
+    <div id="sheet">
+      <div class="sheetHead">
+        <b id="sheetTitle"></b>
+        <button id="sheetClose">✕</button>
+      </div>
 
-  fight.php = v.php;
-  fight.pmax = v.pmax;
-  fight.done = v.done;
-  fight.mobs = v.mobs;
-  fight.readyAt = now + v.ready_in * 1000;
-  fight.healReadyAt = now + v.heal_in * 1000;
+      <div id="sec-profile" class="sec hidden">
+        <div class="inner">
+          <div id="levelText">Уровень 1</div>
+          <div>HP: <span id="hpText"></span></div>
+          <div class="bar"><div class="fill" id="hpFill"></div></div>
+          <div>Опыт: <span id="xpText"></span></div>
+          <div class="bar"><div class="fill" id="xpFill"></div></div>
+        </div>
+        <div class="inner">
+          <div class="title">Итоговые характеристики</div>
+          <div id="totalsBox"></div>
+        </div>
+        <div class="inner">
+          <div class="title" id="pointsText">Свободных очков: 0</div>
+          <div id="statsBox"></div>
+        </div>
+        <div class="inner">
+          <div class="title">Класс</div>
+          <div class="classes" style="margin-bottom:0">
+            <button data-c="fighter">Боец</button>
+            <button data-c="rogue">Плут</button>
+            <button data-c="gatherer">Сборщик</button>
+          </div>
+        </div>
+        <div class="inner">
+          <div class="title">Экипировка</div>
+          <div class="grid4" id="equip"></div>
+          <div class="hint">Нажми на надетый предмет, чтобы снять</div>
+        </div>
+        <div class="inner" id="invBox">
+          <div class="title">Инвентарь <span id="invCount"></span></div>
+          <div class="grid5" id="inv"></div>
+          <div class="hint">Нажми на предмет, чтобы надеть</div>
+          <button id="delBtn" class="small">🗑 Режим удаления: выкл</button>
+        </div>
+      </div>
 
-  if (fight.selected === null || !isAlive(fight.selected)) {
-    const a = fight.mobs.find(m => m.hp > 0);
-    fight.selected = a ? a.id : null;
-  }
-  updatePlayer();
-  updateMobs();
-  tickFight();
-}
+      <div id="sec-merchant" class="sec hidden">
+        <div class="tabs">
+          <button data-m="buy" class="active">Купить</button>
+          <button data-m="sell">Скупка</button>
+        </div>
+        <div id="m-buy">
+          <div class="cats">
+            <button data-cat="pvp" class="active">PvP</button>
+            <button data-cat="mine">Шахта</button>
+            <button data-cat="other">Остальное</button>
+          </div>
+          <div class="inner" id="shopList"></div>
+        </div>
+        <div id="m-sell" class="hidden">
+          <div class="inner">
+            <div class="title">Я покупаю ресурсы: дерево, рыбу, руду, слитки</div>
+            <div id="sellList"></div>
+          </div>
+        </div>
+      </div>
 
-function tickFight() {
-  const now = Date.now();
+      <div id="sec-auction" class="sec hidden">
+        <div class="inner">Аукцион скоро откроется. Здесь можно будет выставлять свои предметы и покупать у других игроков.</div>
+      </div>
 
-  const atk = $("fAttack");
-  atk.classList.toggle("hidden", fight.done);
-  atk.disabled = now < fight.readyAt || fight.selected === null;
-  $("fFlee").textContent = fight.done ? "🏠 На спавн" : "🏃 Бежать";
+      <div id="sec-forge" class="sec hidden">
+        <div class="inner">Кузня временно закрыта. Позже здесь можно будет ремонтировать, улучшать и создавать предметы.</div>
+      </div>
 
-  const wait = Math.ceil((fight.healReadyAt - now) / 1000);
-  fight.healBtns.forEach(h => {
-    h.btn.disabled = wait > 0 || fight.php >= fight.pmax || fight.done;
-    h.btn.textContent = h.label + (wait > 0 ? " (" + wait + ")" : "");
-  });
-}
+      <div id="sec-mine" class="sec hidden">
+        <div class="inner">Шахта пока закрыта. Скоро здесь можно будет добывать руду.</div>
+      </div>
 
-function closeFight() {
-  fight.active = false;
-  clearInterval(fightPoll);
-  clearInterval(fightTick);
-  $("fightRoot").classList.add("hidden");
-}
+      <div id="sec-gates" class="sec hidden">
+        <button class="big" id="gBase">🏠 Построить базу</button>
+        <button class="big" id="gRtp">🎲 RTP — случайное путешествие</button>
+      </div>
+    </div>
+  </div>
 
-function onDeath(res) {
-  closeFight();
-  refreshProfile();
-  if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.2") && tg.showAlert) {
-    tg.showAlert(res.message);
-  } else {
-    setStatus(res.message);
-  }
-}
-
-function startFight(v) {
-  fight.active = false;
-  fight.selected = null;
-  fight.gainXp = 0;
-  fight.gainSilver = 0;
-  fight.log = [];
-  fight.seen = new Set();
-  fight.php = v.php;
-  $("fLog").textContent = "";
-  $("fightRoot").classList.remove("hidden");
-
-  buildMobs(v.mobs);
-  renderHeal();
-  applyView(v);
-  fight.active = true;
-  logLine("Из кустов выскочили мобы! Выбери цель и атакуй");
-
-  clearInterval(fightPoll);
-  clearInterval(fightTick);
-  fightPoll = setInterval(pollFight, 1000);
-  fightTick = setInterval(tickFight, 250);
-}
-
-async function pollFight() {
-  if (!fight.active || fBusy) return;
-  try {
-    const res = await call("/fight/state", {init_data: tg.initData});
-    if (res.dead) { onDeath(res); return; }
-    applyView(res);
-  } catch (e) {
-    if (e.message === "Ты сейчас не здесь") closeFight();
-  }
-}
-
-/* ---------- кнопки ---------- */
-$("fAttack").onclick = async () => {
-  if (fBusy || fight.selected === null) return;
-  fBusy = true;
-  try {
-    const res = await call("/fight/attack",
-      {init_data: tg.initData, mob_id: fight.selected});
-    if (res.dead) {
-      onDeath(res);
-    } else {
-      applyView(res);
-      logLine(res.hit.miss
-        ? "💨 Ты промахнулся"
-        : "⚔️ Ты нанёс " + res.hit.damage + (res.hit.crit ? " (КРИТ!)" : ""));
-
-      if (res.killed) {
-        fight.gainXp += res.killed.xp;
-        fight.gainSilver += res.killed.silver;
-        logLine("☠️ " + res.killed.name + " побеждён: +" + res.killed.xp +
-                " опыта, +" + res.killed.silver + " серебра");
-        if (res.player) show(res.player);
-      }
-      if (res.done) {
-        logLine("🏆 Победа! Всего: +" + fight.gainXp + " опыта, +" +
-                fight.gainSilver + " серебра");
-      }
-    }
-  } catch (e) {
-    if (e.message === "Ты сейчас не здесь") closeFight();
-    else logLine("⚠️ " + e.message);
-  }
-  fBusy = false;
-};
-
-$("fFlee").onclick = async () => {
-  if (fBusy) return;
-  fBusy = true;
-  try {
-    const res = await call("/fight/flee", {init_data: tg.initData});
-    if (res.dead) {
-      onDeath(res);
-    } else if (res.fled) {
-      closeFight();
-      setStatus(res.message);
-      refreshProfile();
-    } else {
-      applyView(res);
-      logLine("🏃 " + res.message);
-    }
-  } catch (e) {
-    if (e.message === "Ты сейчас не здесь") closeFight();
-    else logLine("⚠️ " + e.message);
-  }
-  fBusy = false;
-};
+<script src="/js/ui.js?v=15"></script>
+<script src="/js/world.js?v=15"></script>
+<script src="/js/fight.js?v=15"></script>
+<script>start();</script>
+</body>
+</html>
