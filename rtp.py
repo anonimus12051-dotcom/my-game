@@ -23,7 +23,7 @@ router = APIRouter()
 
 PLACE_WEIGHTS = {"forest": 40, "lake": 18, "clearing": 30}
 
-# секунд между ударами топором (чем лучше топор, тем быстрее)
+# секунд между ударами топором
 AXE_GAP = {
     "wooden_axe": 10,
     "stone_axe": 9,
@@ -62,17 +62,130 @@ NAMES = {
     "fish_good": "Хорошая рыба",
     "fish_rare": "Редкая рыба",
     "gold_ingot": "Золотой слиток",
+    "stone": "Камень",
+    "coal": "Уголь",
+    "copper_ore": "Медная руда",
 }
 
+# ---------- шахта ----------
 
-class TreeRequest(BaseModel):
+MINE_W = 720
+MINE_H = 900
+
+PICKAXE_BOOST = {
+    "wooden_pickaxe": 0.08,
+    "stone_pickaxe": 0.10,
+    "iron_pickaxe": 0.12,
+    "prima_pickaxe": 0.15,
+    "crystal_pickaxe": 0.18,
+}
+
+PICKAXE_SPEED = {
+    "wooden_pickaxe": 1.0,
+    "stone_pickaxe": 0.90,
+    "iron_pickaxe": 0.80,
+    "prima_pickaxe": 0.70,
+    "crystal_pickaxe": 0.60,
+}
+
+VEIN_TYPES = {
+    "stone":  {"name": "Камень",        "emoji": "🪨", "base": 50, "loot": ("stone", 1, 5)},
+    "coal":   {"name": "Уголь",         "emoji": "⬛", "base": 60, "loot": ("coal", 1, 4)},
+    "copper": {"name": "Медная руда",   "emoji": "🟠", "base": 70, "loot": ("copper_ore", 1, 3)},
+    "iron":   {"name": "Железная руда", "emoji": "⚙️", "base": 80, "loot": ("iron_ore", 1, 3)},
+}
+
+class VeinRequest(BaseModel):
     init_data: str
-    tree_id: int
+    vein_id: int
 
 
-class AnswerRequest(BaseModel):
-    init_data: str
-    answer: List[str]
+def best_pickaxe(tid):
+    rows = (
+        supabase.table("inventory")
+        .select("item_id")
+        .eq("telegram_id", tid)
+        .in_("item_id", list(PICKAXE_BOOST))
+        .execute()
+        .data
+    )
+    if not rows:
+        return None, None
+    # лучшая по скорости (меньший коэффициент)
+    best = min(rows, key=lambda r: PICKAXE_SPEED.get(r["item_id"], 1.0))
+    pid = best["item_id"]
+    return pid, PICKAXE_SPEED[pid], PICKAXE_BOOST[pid]
+
+
+def make_veins():
+    types = ["stone", "stone", "stone", "coal", "coal", "coal",
+             "copper", "copper", "copper", "iron", "iron", "iron"]
+    random.shuffle(types)
+    veins = []
+    tries = 0
+    while len(veins) < 12 and tries < 800:
+        tries += 1
+        x = random.randint(50, MINE_W - 50)
+        y = random.randint(160, MINE_H - 60)  # сверху место под выход и лифт
+        if all((x - v["x"]) ** 2 + (y - v["y"]) ** 2 > 85 ** 2 for v in veins):
+            t = types[len(veins)]
+            info = VEIN_TYPES[t]
+            veins.append({
+                "id": len(veins),
+                "type": t,
+                "x": x,
+                "y": y,
+                "emoji": info["emoji"],
+                "name": info["name"],
+                "total": float(info["base"]),
+                "left": float(info["base"]),
+                "started": False,
+                "start_at": 0.0,
+                "done": False,
+            })
+    return veins
+
+
+def advance_mine(data, now):
+    """Считает прогресс AFK-копания."""
+    for v in data["veins"]:
+        if v["started"] and not v["done"] and v["start_at"] > 0:
+            passed = now - v["start_at"]
+            v["left"] = max(0.0, v["total"] - passed)
+            if v["left"] <= 0:
+                v["left"] = 0.0
+                v["done"] = True
+
+
+def vein_view(v, now):
+    left = v["left"]
+    if v["started"] and not v["done"]:
+        left = max(0.0, v["total"] - (now - v["start_at"]))
+    return {
+        "id": v["id"],
+        "type": v["type"],
+        "x": v["x"],
+        "y": v["y"],
+        "emoji": v["emoji"],
+        "name": v["name"],
+        "total": round(v["total"], 1),
+        "left": round(left, 1),
+        "started": v["started"],
+        "done": v["done"] or left <= 0,
+        "progress": 0 if v["total"] <= 0 else round(1 - left / v["total"], 3),
+    }
+
+
+def mine_payload(data):
+    now = time.time()
+    advance_mine(data, now)
+    return {
+        "place": "mine",
+        "width": MINE_W,
+        "height": MINE_H,
+        "start": {"x": MINE_W // 2, "y": 90},
+        "veins": [vein_view(v, now) for v in data["veins"]],
+    }
 
 
 def loot_text(loot):
@@ -88,7 +201,7 @@ def best_axe_gap(tid):
         .execute()
         .data
     )
-    gaps = [AXE_GAP[r["item_id"]] for r in rows]
+    coaps = [AXE_GAP[r["item_id"]] for r in rows]
     return min(gaps) if gaps else None
 
 
@@ -325,6 +438,151 @@ def fish_finish(req: AnswerRequest):
     }
 
 
+# ---------- шахта ----------
+
+@router.post("/mine/enter")
+@safe
+def mine_enter(req: InitRequest):
+    tid = user_id(req.init_data)
+
+    # уже в шахте?
+    try:
+        data, ver = load_session(tid, "mine")
+        return mine_payload(data)
+    except HTTPException:
+        pass
+
+    # нужна кирка
+    pid, speed, boost = best_pickaxe(tid)
+    if pid is None:
+        raise HTTPException(400, "Нужна кирка. Купи её у торговца")
+
+    veins = make_veins()
+    # применяем скорость кирки к базовому времени
+    for v in veins:
+        v["total"] = round(v["total"] * speed, 1)
+        v["left"] = v["total"]
+
+    data = {"veins": veins, "pickaxe": pid, "boost": boost}
+    start_session(tid, "mine", data)
+    return mine_payload(data)
+
+
+@router.post("/mine/state")
+@safe
+def mine_state(req: InitRequest):
+    tid = user_id(req.init_data)
+    data, ver = load_session(tid, "mine")
+    now = time.time()
+    advance_mine(data, now)
+    # сохраняем прогресс (чтобы AFK работал между запросами)
+    commit_session(tid, data, ver)
+    return mine_payload(data)
+
+
+@router.post("/mine/start")
+@safe
+def mine_start(req: VeinRequest):
+    tid = user_id(req.init_data)
+    data, ver = load_session(tid, "mine")
+
+    v = next((x for x in data["veins"] if x["id"] == req.vein_id), None)
+    if v is None or v["done"]:
+        raise HTTPException(404, "Эта жила уже выкопана")
+
+    if v["started"]:
+        # уже копается — просто вернуть состояние
+        return {"vein": vein_view(v, time.time()), "message": "Уже копается"}
+
+    now = time.time()
+    v["started"] = True
+    v["start_at"] = now
+    v["left"] = v["total"]
+    commit_session(tid, data, ver)
+
+    return {
+        "vein": vein_view(v, now),
+        "message": "Начал копать " + v["name"],
+        "boost_percent": int(data.get("boost", 0.1) * 100),
+    }
+
+
+@router.post("/mine/boost")
+@safe
+def mine_boost(req: VeinRequest):
+    tid = user_id(req.init_data)
+    data, ver = load_session(tid, "mine")
+
+    v = next((x for x in data["veins"] if x["id"] == req.vein_id), None)
+    if v is None or v["done"] or not v["started"]:
+        raise HTTPException(400, "Нельзя ускорить")
+
+    now = time.time()
+    # актуализируем left
+    passed = now - v["start_at"]
+    v["left"] = max(0.0, v["total"] - passed)
+
+    if v["left"] <= 0:
+        v["done"] = True
+        commit_session(tid, data, ver)
+        return {"vein": vein_view(v, now), "message": "Уже готово"}
+
+    boost = data.get("boost", 0.10)
+    reduce = v["total"] * boost
+    v["left"] = max(0.0, v["left"] - reduce)
+    # сдвигаем start_at так, чтобы left остался правильным
+    v["start_at"] = now - (v["total"] - v["left"])
+
+    if v["left"] <= 0:
+        v["left"] = 0.0
+        v["done"] = True
+
+    commit_session(tid, data, ver)
+    return {
+        "vein": vein_view(v, now),
+        "message": "Ускорено! -" + str(int(boost * 100)) + "%",
+        "reduced": round(reduce, 1),
+    }
+
+
+@router.post("/mine/collect")
+@safe
+def mine_collect(req: VeinRequest):
+    tid = user_id(req.init_data)
+    data, ver = load_session(tid, "mine")
+
+    v = next((x for x in data["veins"] if x["id"] == req.vein_id), None)
+    if v is None:
+        raise HTTPException(404, "Жила не найдена")
+
+    now = time.time()
+    advance_mine(data, now)
+
+    if not v["done"] and v["left"] > 0:
+        raise HTTPException(400, "Ещё не готово")
+
+    if v.get("collected"):
+        raise HTTPException(400, "Уже собрано")
+
+    info = VEIN_TYPES[v["type"]]
+    item_id, mn, mx = info["loot"]
+    qty = random.randint(mn, mx)
+    loot = {item_id: qty}
+
+    check_space(tid, loot)
+    v["collected"] = True
+    v["done"] = True
+    commit_session(tid, data, ver)
+    add_items(tid, loot)
+
+    return {
+        "message": "Добыто: " + loot_text(loot),
+        "vein": vein_view(v, now),
+        "inventory": load_inventory(tid),
+        "player": build_player(tid),
+    }
+
+
 # ---------- RTP ----------
 
 @router.post("/rtp/roll")
@@ -384,10 +642,11 @@ def rtp_current(req: InitRequest):
         return forest_payload(s["data"])
     if s["kind"] == "clearing":
         return clearing_state(tid, s["data"], s["ver"])
+    if s["kind"] == "mine":
+        return mine_payload(s["data"])
 
     d = s["data"]
     if d["phase"] == "bite":
-        # перезашёл посреди мини-игры: рыба сорвалась
         d = {"phase": "idle"}
         commit_session(tid, d, s["ver"])
 
