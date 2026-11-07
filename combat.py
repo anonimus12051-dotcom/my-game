@@ -2,25 +2,23 @@ import random
 import time
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from main import supabase, verify_telegram_data, change_balance, load_inventory
-from progress import award_xp, build_player
-from rtp import (
+from core import (
+    InitRequest,
+    change_balance,
+    clear_session,
+    commit_session,
+    load_session,
     safe,
     start_session,
-    load_session,
-    commit_session,
-    make_trees,
-    make_treasure,
-    forest_payload,
-    rtp_current,
+    supabase,
+    user_id,
 )
+from inventory import load_inventory
+from progress import award_xp, build_player
 
 router = APIRouter()
-
-PLACE_WEIGHTS = {"forest": 40, "lake": 18, "clearing": 30}
 
 PLAYER_COOLDOWN = 1.0
 COOLDOWN_SLACK = 0.15
@@ -35,10 +33,6 @@ FLEE_RETRY = 3.0
 DEATH_LOSS = 0.5
 MEDIUM_CHANCE = 0.20
 COUNT_WEIGHTS = [45, 35, 20]
-
-
-class InitRequest(BaseModel):
-    init_data: str
 
 
 class AttackRequest(BaseModel):
@@ -89,8 +83,8 @@ def start_clearing(tid):
             "xp": m["xp"],
             "silver": m["silver"],
             "interval": interval,
-            "miss": m.get("miss", 10),
-            "evasion": m.get("evasion", 5),
+            "miss": m["miss"],
+            "evasion": m["evasion"],
             "n": 0,
             "next": now + interval + i * 0.7,
         })
@@ -127,29 +121,27 @@ def regen_tick(data, seconds):
 
 def advance(data, now):
     """Применяет всё, что случилось с last_tick до now.
-    Результат атак мобов зависит только от seed и номера удара,
-    поэтому пересчёт даёт одно и то же. Возвращает список событий."""
+    Исход ударов мобов зависит только от seed и номера удара,
+    поэтому повторный пересчёт даёт тот же результат.
+    Возвращает список событий."""
     out = []
     if data["php"] <= 0:
         return out
 
     reduction = data["armor"] / (data["armor"] + ARMOR_K)
-    seed = data.get("seed", "0")
 
     raw = []
     for m in data["mobs"]:
         if m["hp"] <= 0:
             continue
-        interval = m.get("interval", DEFAULT_INTERVAL)
-        base_n = m.get("n", 0)
         t = m["next"]
         idx = 0
         while t <= now and idx < 100:
-            raw.append((t, m, base_n + idx))
-            t += interval
+            raw.append((t, m, m["n"] + idx))
+            t += m["interval"]
             idx += 1
         m["next"] = t
-        m["n"] = base_n + idx
+        m["n"] += idx
     raw.sort(key=lambda e: e[0])
 
     cursor = data["last_tick"]
@@ -158,8 +150,8 @@ def advance(data, now):
         cursor = t
 
         eid = str(m["id"]) + ":" + str(k)
-        rng = random.Random(seed + ":" + eid)
-        miss = min(MAX_MISS, m.get("miss", 10) + data.get("evasion", 0))
+        rng = random.Random(data["seed"] + ":" + eid)
+        miss = min(MAX_MISS, m["miss"] + data["evasion"])
 
         if rng.random() * 100 < miss:
             out.append({"id": eid, "mob": m["name"], "hit": False, "dmg": 0})
@@ -178,15 +170,13 @@ def advance(data, now):
 
 
 def fight_view(data, now, events):
-    ready = max(0.0, PLAYER_COOLDOWN - (now - data["last_attack"]))
-    heal_in = max(0.0, data.get("heal_at", 0) - now)
     return {
         "place": "clearing",
         "php": round(data["php"], 1),
         "pmax": data["pmax"],
         "done": data["done"],
-        "ready_in": round(ready, 2),
-        "heal_in": round(heal_in, 1),
+        "ready_in": round(max(0.0, PLAYER_COOLDOWN - (now - data["last_attack"])), 2),
+        "heal_in": round(max(0.0, data["heal_at"] - now), 1),
         "events": events,
         "mobs": [
             {
@@ -217,7 +207,7 @@ def process_death(tid, ver):
     if lost > 0:
         change_balance(tid, -lost)
 
-    supabase.table("sessions").delete().eq("telegram_id", tid).execute()
+    clear_session(tid)
     return {
         "dead": True,
         "lost": lost,
@@ -225,63 +215,10 @@ def process_death(tid, ver):
     }
 
 
-# ---------- маршруты ----------
-
-@router.post("/rtp/roll")
-@safe
-def rtp_roll(req: InitRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-
-    cur = (
-        supabase.table("sessions")
-        .select("kind,data")
-        .eq("telegram_id", tid)
-        .limit(1)
-        .execute()
-        .data
-    )
-    if cur and cur[0]["kind"] == "clearing":
-        d = cur[0]["data"]
-        if not d.get("done") and not d.get("dead"):
-            raise HTTPException(400, "Ты в бою! Сначала победи или сбеги")
-
-    place = random.choices(
-        list(PLACE_WEIGHTS), weights=list(PLACE_WEIGHTS.values())
-    )[0]
-
-    if place == "clearing":
-        return start_clearing(tid)
-
-    if place == "forest":
-        data = {"trees": make_trees(), "treasure": make_treasure()}
-        start_session(tid, "forest", data)
-        return forest_payload(data)
-
-    start_session(tid, "lake", {"phase": "idle"})
-    return {"place": "lake", "phase": "idle", "wait_left": 0}
-
-
-@router.post("/rtp/current2")
-@safe
-def rtp_current2(req: InitRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-    r = (
-        supabase.table("sessions")
-        .select("kind,data,ver")
-        .eq("telegram_id", tid)
-        .limit(1)
-        .execute()
-    )
-    if not r.data:
-        return {"place": None}
-
-    s = r.data[0]
-    if s["kind"] != "clearing":
-        return rtp_current(req)
-
-    data, ver = s["data"], s["ver"]
+def clearing_state(tid, data, ver):
+    """Состояние боя при возвращении в игру."""
     if data.get("dead"):
-        supabase.table("sessions").delete().eq("telegram_id", tid).execute()
+        clear_session(tid)
         return {"place": None}
 
     now = time.time()
@@ -291,13 +228,20 @@ def rtp_current2(req: InitRequest):
     return fight_view(data, now, events)
 
 
-@router.post("/fight/state")
-@safe
-def fight_state(req: InitRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
+def load_fight(tid):
     data, ver = load_session(tid, "clearing")
     if data.get("dead"):
         raise HTTPException(400, "Ты сейчас не здесь")
+    return data, ver
+
+
+# ---------- маршруты ----------
+
+@router.post("/fight/state")
+@safe
+def fight_state(req: InitRequest):
+    tid = user_id(req.init_data)
+    data, ver = load_fight(tid)
 
     now = time.time()
     events = advance(data, now)
@@ -309,10 +253,8 @@ def fight_state(req: InitRequest):
 @router.post("/fight/attack")
 @safe
 def fight_attack(req: AttackRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-    data, ver = load_session(tid, "clearing")
-    if data.get("dead"):
-        raise HTTPException(400, "Ты сейчас не здесь")
+    tid = user_id(req.init_data)
+    data, ver = load_fight(tid)
 
     now = time.time()
     events = advance(data, now)
@@ -332,7 +274,7 @@ def fight_attack(req: AttackRequest):
     data["last_attack"] = now
     killed = None
 
-    miss = min(MAX_MISS, PLAYER_BASE_MISS + mob.get("evasion", 0))
+    miss = min(MAX_MISS, PLAYER_BASE_MISS + mob["evasion"])
     if random.random() * 100 < miss:
         hit = {"miss": True}
     else:
@@ -352,23 +294,22 @@ def fight_attack(req: AttackRequest):
 
     commit_session(tid, data, ver)
 
-    if killed:
-        change_balance(tid, killed["silver"])
-        award_xp(tid, killed["xp"])
-
     view = fight_view(data, now, events)
     view["hit"] = hit
     view["killed"] = killed
+
+    if killed:
+        change_balance(tid, killed["silver"])
+        award_xp(tid, killed["xp"])
+        view["player"] = build_player(tid)
     return view
 
 
 @router.post("/fight/heal")
 @safe
 def fight_heal(req: HealRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-    data, ver = load_session(tid, "clearing")
-    if data.get("dead"):
-        raise HTTPException(400, "Ты сейчас не здесь")
+    tid = user_id(req.init_data)
+    data, ver = load_fight(tid)
 
     now = time.time()
     events = advance(data, now)
@@ -377,7 +318,7 @@ def fight_heal(req: HealRequest):
 
     if data["done"]:
         raise HTTPException(400, "Бой уже окончен")
-    if now < data.get("heal_at", 0):
+    if now < data["heal_at"]:
         raise HTTPException(400, "Лечение ещё не готово")
     if data["php"] >= data["pmax"]:
         raise HTTPException(400, "HP уже полное")
@@ -389,10 +330,11 @@ def fight_heal(req: HealRequest):
         .eq("telegram_id", tid)
         .limit(1)
         .execute()
+        .data
     )
-    if not r.data:
+    if not r:
         raise HTTPException(404, "Предмет не найден")
-    row = r.data[0]
+    row = r[0]
     item = row["items"] or {}
     amount = item.get("heal") or 0
     if item.get("type") != "heal" or amount <= 0:
@@ -424,7 +366,7 @@ def fight_heal(req: HealRequest):
     try:
         commit_session(tid, data, ver)
     except HTTPException:
-        # вернуть предмет, если бой не сохранился
+        # бой не сохранился: вернуть предмет
         if row["qty"] > 1:
             supabase.table("inventory").update(
                 {"qty": row["qty"]}
@@ -436,7 +378,7 @@ def fight_heal(req: HealRequest):
         raise
 
     view = fight_view(data, now, events)
-    view["healed"] = {"name": item.get("name", "Лечение"), "amount": amount}
+    view["healed"] = {"name": item["name"], "amount": amount}
     view["inventory"] = load_inventory(tid)
     return view
 
@@ -444,10 +386,8 @@ def fight_heal(req: HealRequest):
 @router.post("/fight/flee")
 @safe
 def fight_flee(req: InitRequest):
-    tid = verify_telegram_data(req.init_data)["id"]
-    data, ver = load_session(tid, "clearing")
-    if data.get("dead"):
-        raise HTTPException(400, "Ты сейчас не здесь")
+    tid = user_id(req.init_data)
+    data, ver = load_fight(tid)
 
     now = time.time()
     events = advance(data, now)
@@ -455,14 +395,14 @@ def fight_flee(req: InitRequest):
         return process_death(tid, ver)
 
     if data["done"]:
-        supabase.table("sessions").delete().eq("telegram_id", tid).execute()
+        clear_session(tid)
         return {"fled": True, "message": "Ты вернулся на спавн"}
 
     if now < data["flee_at"]:
         raise HTTPException(400, "Подожди перед новой попыткой")
 
     if random.random() < FLEE_CHANCE:
-        supabase.table("sessions").delete().eq("telegram_id", tid).execute()
+        clear_session(tid)
         return {"fled": True, "message": "Ты сбежал"}
 
     data["flee_at"] = now + FLEE_RETRY
@@ -471,12 +411,3 @@ def fight_flee(req: InitRequest):
     view["fled"] = False
     view["message"] = "Не удалось сбежать!"
     return view
-
-
-@router.get("/fight.js")
-def fight_js():
-    return FileResponse(
-        "static/fight.js",
-        media_type="application/javascript",
-        headers={"Cache-Control": "no-store"},
-        )
