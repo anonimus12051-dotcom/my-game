@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from main import supabase, verify_telegram_data, change_balance
+from main import supabase, verify_telegram_data, change_balance, load_inventory
 from progress import award_xp, build_player
 from rtp import (
     safe,
@@ -24,9 +24,12 @@ PLACE_WEIGHTS = {"forest": 40, "lake": 18, "clearing": 30}
 
 PLAYER_COOLDOWN = 1.0
 COOLDOWN_SLACK = 0.15
-MOB_INTERVAL = 2.0
+DEFAULT_INTERVAL = 3.5
 ARMOR_K = 40
 REGEN_INTERVAL = 5.0
+PLAYER_BASE_MISS = 5
+MAX_MISS = 75
+HEAL_COOLDOWN = 6.0
 FLEE_CHANCE = 0.7
 FLEE_RETRY = 3.0
 DEATH_LOSS = 0.5
@@ -41,6 +44,11 @@ class InitRequest(BaseModel):
 class AttackRequest(BaseModel):
     init_data: str
     mob_id: int
+
+
+class HealRequest(BaseModel):
+    init_data: str
+    inv_id: int
 
 
 # ---------- создание боя ----------
@@ -70,6 +78,7 @@ def start_clearing(tid):
 
     mobs = []
     for i, m in enumerate(make_group()):
+        interval = float(m.get("attack_interval") or DEFAULT_INTERVAL)
         mobs.append({
             "id": i,
             "name": m["name"],
@@ -79,7 +88,11 @@ def start_clearing(tid):
             "dmg": m["damage"],
             "xp": m["xp"],
             "silver": m["silver"],
-            "next": now + MOB_INTERVAL + i * 0.7,
+            "interval": interval,
+            "miss": m.get("miss", 10),
+            "evasion": m.get("evasion", 5),
+            "n": 0,
+            "next": now + interval + i * 0.7,
         })
 
     data = {
@@ -90,18 +103,21 @@ def start_clearing(tid):
         "crit": totals["crit"],
         "armor": totals["armor"],
         "regen": totals["regen"],
+        "evasion": totals["evasion"],
+        "seed": str(random.random()),
         "last_tick": now,
         "last_attack": 0,
+        "heal_at": 0,
         "flee_at": 0,
         "done": False,
     }
     start_session(tid, "clearing", data)
-    return fight_view(data, now)
+    return fight_view(data, now, [])
 
 
 # ---------- ход времени ----------
 
-def heal(data, seconds):
+def regen_tick(data, seconds):
     if seconds > 0:
         data["php"] = min(
             data["pmax"],
@@ -110,46 +126,68 @@ def heal(data, seconds):
 
 
 def advance(data, now):
-    """Применяет всё, что случилось с last_tick до now: атаки мобов и лечение."""
+    """Применяет всё, что случилось с last_tick до now.
+    Результат атак мобов зависит только от seed и номера удара,
+    поэтому пересчёт даёт одно и то же. Возвращает список событий."""
+    out = []
     if data["php"] <= 0:
-        return
+        return out
 
     reduction = data["armor"] / (data["armor"] + ARMOR_K)
+    seed = data.get("seed", "0")
 
-    events = []
+    raw = []
     for m in data["mobs"]:
         if m["hp"] <= 0:
             continue
+        interval = m.get("interval", DEFAULT_INTERVAL)
+        base_n = m.get("n", 0)
         t = m["next"]
-        guard = 0
-        while t <= now and guard < 100:
-            events.append((t, m))
-            t += MOB_INTERVAL
-            guard += 1
+        idx = 0
+        while t <= now and idx < 100:
+            raw.append((t, m, base_n + idx))
+            t += interval
+            idx += 1
         m["next"] = t
-    events.sort(key=lambda e: e[0])
+        m["n"] = base_n + idx
+    raw.sort(key=lambda e: e[0])
 
     cursor = data["last_tick"]
-    for t, m in events:
-        heal(data, t - cursor)
+    for t, m, k in raw:
+        regen_tick(data, t - cursor)
         cursor = t
-        data["php"] -= max(1.0, m["dmg"] * (1 - reduction))
+
+        eid = str(m["id"]) + ":" + str(k)
+        rng = random.Random(seed + ":" + eid)
+        miss = min(MAX_MISS, m.get("miss", 10) + data.get("evasion", 0))
+
+        if rng.random() * 100 < miss:
+            out.append({"id": eid, "mob": m["name"], "hit": False, "dmg": 0})
+            continue
+
+        dmg = round(max(1.0, m["dmg"] * (1 - reduction)), 1)
+        data["php"] -= dmg
+        out.append({"id": eid, "mob": m["name"], "hit": True, "dmg": dmg})
         if data["php"] <= 0:
             data["php"] = 0
-            return
+            return out
 
-    heal(data, now - cursor)
+    regen_tick(data, now - cursor)
     data["last_tick"] = now
+    return out
 
 
-def fight_view(data, now):
+def fight_view(data, now, events):
     ready = max(0.0, PLAYER_COOLDOWN - (now - data["last_attack"]))
+    heal_in = max(0.0, data.get("heal_at", 0) - now)
     return {
         "place": "clearing",
         "php": round(data["php"], 1),
         "pmax": data["pmax"],
         "done": data["done"],
         "ready_in": round(ready, 2),
+        "heal_in": round(heal_in, 1),
+        "events": events,
         "mobs": [
             {
                 "id": m["id"],
@@ -157,7 +195,6 @@ def fight_view(data, now):
                 "emoji": m["emoji"],
                 "hp": round(m["hp"], 1),
                 "max_hp": m["max_hp"],
-                "next_in": round(max(0.0, m["next"] - now), 1),
             }
             for m in data["mobs"]
         ],
@@ -248,10 +285,10 @@ def rtp_current2(req: InitRequest):
         return {"place": None}
 
     now = time.time()
-    advance(data, now)
+    events = advance(data, now)
     if data["php"] <= 0:
         return process_death(tid, ver)
-    return fight_view(data, now)
+    return fight_view(data, now, events)
 
 
 @router.post("/fight/state")
@@ -263,10 +300,10 @@ def fight_state(req: InitRequest):
         raise HTTPException(400, "Ты сейчас не здесь")
 
     now = time.time()
-    advance(data, now)
+    events = advance(data, now)
     if data["php"] <= 0:
         return process_death(tid, ver)
-    return fight_view(data, now)
+    return fight_view(data, now, events)
 
 
 @router.post("/fight/attack")
@@ -278,7 +315,7 @@ def fight_attack(req: AttackRequest):
         raise HTTPException(400, "Ты сейчас не здесь")
 
     now = time.time()
-    advance(data, now)
+    events = advance(data, now)
     if data["php"] <= 0:
         return process_death(tid, ver)
 
@@ -292,20 +329,26 @@ def fight_attack(req: AttackRequest):
     if mob is None:
         raise HTTPException(404, "Этот моб уже побеждён")
 
-    crit = random.random() * 100 < data["crit"]
-    dmg = round(data["damage"] * (1.5 if crit else 1.0), 1)
-    mob["hp"] = round(max(0.0, mob["hp"] - dmg), 1)
     data["last_attack"] = now
-
     killed = None
-    if mob["hp"] <= 0:
-        killed = {
-            "name": mob["name"],
-            "xp": mob["xp"],
-            "silver": mob["silver"],
-        }
-        if all(m["hp"] <= 0 for m in data["mobs"]):
-            data["done"] = True
+
+    miss = min(MAX_MISS, PLAYER_BASE_MISS + mob.get("evasion", 0))
+    if random.random() * 100 < miss:
+        hit = {"miss": True}
+    else:
+        crit = random.random() * 100 < data["crit"]
+        dmg = round(data["damage"] * (1.5 if crit else 1.0), 1)
+        mob["hp"] = round(max(0.0, mob["hp"] - dmg), 1)
+        hit = {"miss": False, "damage": dmg, "crit": crit}
+
+        if mob["hp"] <= 0:
+            killed = {
+                "name": mob["name"],
+                "xp": mob["xp"],
+                "silver": mob["silver"],
+            }
+            if all(m["hp"] <= 0 for m in data["mobs"]):
+                data["done"] = True
 
     commit_session(tid, data, ver)
 
@@ -313,9 +356,88 @@ def fight_attack(req: AttackRequest):
         change_balance(tid, killed["silver"])
         award_xp(tid, killed["xp"])
 
-    view = fight_view(data, now)
-    view["hit"] = {"damage": dmg, "crit": crit}
+    view = fight_view(data, now, events)
+    view["hit"] = hit
     view["killed"] = killed
+    return view
+
+
+@router.post("/fight/heal")
+@safe
+def fight_heal(req: HealRequest):
+    tid = verify_telegram_data(req.init_data)["id"]
+    data, ver = load_session(tid, "clearing")
+    if data.get("dead"):
+        raise HTTPException(400, "Ты сейчас не здесь")
+
+    now = time.time()
+    events = advance(data, now)
+    if data["php"] <= 0:
+        return process_death(tid, ver)
+
+    if data["done"]:
+        raise HTTPException(400, "Бой уже окончен")
+    if now < data.get("heal_at", 0):
+        raise HTTPException(400, "Лечение ещё не готово")
+    if data["php"] >= data["pmax"]:
+        raise HTTPException(400, "HP уже полное")
+
+    r = (
+        supabase.table("inventory")
+        .select("id,item_id,qty,items(name,type,heal)")
+        .eq("id", req.inv_id)
+        .eq("telegram_id", tid)
+        .limit(1)
+        .execute()
+    )
+    if not r.data:
+        raise HTTPException(404, "Предмет не найден")
+    row = r.data[0]
+    item = row["items"] or {}
+    amount = item.get("heal") or 0
+    if item.get("type") != "heal" or amount <= 0:
+        raise HTTPException(400, "Этим нельзя лечиться")
+
+    # сначала тратим предмет, потом сохраняем бой
+    if row["qty"] > 1:
+        spent = (
+            supabase.table("inventory")
+            .update({"qty": row["qty"] - 1})
+            .eq("id", row["id"])
+            .eq("qty", row["qty"])
+            .execute()
+        )
+    else:
+        spent = (
+            supabase.table("inventory")
+            .delete()
+            .eq("id", row["id"])
+            .eq("telegram_id", tid)
+            .execute()
+        )
+    if not spent.data:
+        raise HTTPException(409, "Попробуй ещё раз")
+
+    data["php"] = min(data["pmax"], data["php"] + amount)
+    data["heal_at"] = now + HEAL_COOLDOWN
+
+    try:
+        commit_session(tid, data, ver)
+    except HTTPException:
+        # вернуть предмет, если бой не сохранился
+        if row["qty"] > 1:
+            supabase.table("inventory").update(
+                {"qty": row["qty"]}
+            ).eq("id", row["id"]).execute()
+        else:
+            supabase.table("inventory").insert(
+                {"telegram_id": tid, "item_id": row["item_id"], "qty": 1}
+            ).execute()
+        raise
+
+    view = fight_view(data, now, events)
+    view["healed"] = {"name": item.get("name", "Лечение"), "amount": amount}
+    view["inventory"] = load_inventory(tid)
     return view
 
 
@@ -328,7 +450,7 @@ def fight_flee(req: InitRequest):
         raise HTTPException(400, "Ты сейчас не здесь")
 
     now = time.time()
-    advance(data, now)
+    events = advance(data, now)
     if data["php"] <= 0:
         return process_death(tid, ver)
 
@@ -345,7 +467,7 @@ def fight_flee(req: InitRequest):
 
     data["flee_at"] = now + FLEE_RETRY
     commit_session(tid, data, ver)
-    view = fight_view(data, now)
+    view = fight_view(data, now, events)
     view["fled"] = False
     view["message"] = "Не удалось сбежать!"
     return view
@@ -357,4 +479,4 @@ def fight_js():
         "static/fight.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-store"},
-    )
+        )
