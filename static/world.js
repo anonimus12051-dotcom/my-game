@@ -114,8 +114,6 @@ function drawVillage() {
   places.forEach(p => {
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x, p.y, p.w, p.h);
-    ctx.fillStyle = p.roof;
-    ctx.fillRect(p.x - 4, p.y - 8, p.w + 8, 22);
     ctx.fillStyle = "#fff";
     emoji(p.emoji, p.x + p.w / 2, p.y + p.h / 2 - 2, 30);
     ctx.font = "bold 13px sans-serif";
@@ -183,120 +181,122 @@ function drawLake() {
   drawPlayer();
 }
 
+function drawVein(v) {
+  // рисуем жилу как кучку камней (под твои текстуры)
+  let colors;
+  if (v.type === "coal") {
+    colors = ["#1a1a1a", "#2a2a2a", "#111", "#333"];
+  } else if (v.type === "copper") {
+    colors = ["#b35a2a", "#d4783a", "#8a3a1a", "#e09050"];
+  } else if (v.type === "iron") {
+    colors = ["#8a8a9a", "#a0a0b0", "#6a6a7a", "#c0b0a0"];
+  } else {
+    colors = ["#6a6a6a", "#888", "#555", "#999"];
+  }
+
+  const spots = [
+    [0, 0, 13], [-9, 4, 9], [9, 5, 10], [-5, -7, 8], [6, -6, 7],
+    [-12, -2, 7], [11, -1, 6], [0, 8, 8]
+  ];
+
+  spots.forEach(([dx, dy, r], i) => {
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.beginPath();
+    ctx.arc(v.x + dx, v.y + dy, r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
 function drawMine() {
-  ctx.fillStyle = "#14141c";
+  ctx.fillStyle = "#12121a";
   ctx.fillRect(0, 0, W, H);
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
 
-  ctx.fillStyle = "#1e1e28";
+  // пол
+  ctx.fillStyle = "#1c1c26";
   ctx.fillRect(0, 0, mine.width, mine.height);
 
-  ctx.fillStyle = "#252530";
-  for (let gx = 0; gx < mine.width; gx += 48) {
-    for (let gy = 0; gy < mine.height; gy += 48) {
-      if ((gx / 48 + gy / 48) % 2 === 0) {
-        ctx.fillRect(gx, gy, 48, 48);
-      }
+  ctx.fillStyle = "#242430";
+  for (let gx = 0; gx < mine.width; gx += 40) {
+    for (let gy = 0; gy < mine.height; gy += 40) {
+      if ((gx / 40 + gy / 40) % 2 === 0) ctx.fillRect(gx, gy, 40, 40);
     }
-  }
-
-  ctx.strokeStyle = "#18181f";
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 18; i++) {
-    const x = (i * 97) % mine.width;
-    const y = (i * 53) % mine.height;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + 30 + (i % 5) * 8, y + 10 + (i % 3) * 6);
-    ctx.stroke();
   }
 
   const ex = mine.width / 2;
 
   // Выход
   ctx.fillStyle = "#2a221c";
-  ctx.fillRect(ex - 55, 10, 110, 70);
-  ctx.fillStyle = "#1a1410";
+  ctx.fillRect(ex - 60, 8, 120, 75);
+  ctx.fillStyle = "#0f0c0a";
   ctx.beginPath();
-  ctx.ellipse(ex, 80, 48, 22, 0, 0, Math.PI * 2);
+  ctx.ellipse(ex, 85, 52, 24, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#0d0d12";
-  ctx.fillRect(ex - 22, 35, 44, 45);
+  ctx.fillStyle = "#1a1410";
+  ctx.fillRect(ex - 24, 38, 48, 48);
   ctx.fillStyle = "#3a2f26";
-  ctx.fillRect(ex - 18, 40, 36, 38);
-  emoji("🚪", ex, 55, 26);
-  ctx.fillStyle = "#aaa";
-  ctx.font = "bold 13px sans-serif";
+  ctx.fillRect(ex - 20, 43, 40, 40);
+  emoji("🚪", ex, 60, 28);
+  ctx.fillStyle = "#ccc";
+  ctx.font = "bold 14px sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("Выход", ex, 105);
+  ctx.fillText("Выход", ex, 115);
 
   // Лифт
-  ctx.fillStyle = "#2a2a35";
-  ctx.fillRect(ex + 70, 18, 70, 75);
-  ctx.fillStyle = "#1a1a22";
-  ctx.fillRect(ex + 78, 26, 54, 54);
+  ctx.fillStyle = "#2a2a38";
+  ctx.fillRect(ex + 75, 15, 78, 80);
+  ctx.fillStyle = "#15151e";
+  ctx.fillRect(ex + 83, 23, 62, 62);
   ctx.strokeStyle = "#444";
   ctx.lineWidth = 2;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     ctx.beginPath();
-    ctx.moveTo(ex + 78, 26 + i * 18);
-    ctx.lineTo(ex + 132, 26 + i * 18);
+    ctx.moveTo(ex + 83, 23 + i * 15);
+    ctx.lineTo(ex + 145, 23 + i * 15);
     ctx.stroke();
   }
-  emoji("🛗", ex + 105, 50, 24);
-  ctx.fillStyle = "#888";
-  ctx.font = "11px sans-serif";
-  ctx.fillText("Лифт", ex + 105, 95);
-  ctx.fillText("скоро", ex + 105, 108);
+  emoji("🛗", ex + 114, 52, 26);
+  ctx.fillStyle = "#999";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("Лифт", ex + 114, 105);
+  ctx.fillText("скоро", ex + 114, 119);
 
-  // Жилы
+  // Жилы (только открытые)
   mine.veins.forEach(v => {
-    if (v.done && v.collected) return;
+    if (!v.unlocked) return;
+    if (v.collected) return;
 
-    const alpha = v.done ? 0.45 : 1;
+    const alpha = v.done ? 0.4 : 1;
     ctx.globalAlpha = alpha;
 
-    let body = "#6a6a6a";
-    let accent = "#888";
-    if (v.type === "coal") {
-      body = "#222"; accent = "#444";
-    } else if (v.type === "copper") {
-      body = "#b35a2a"; accent = "#e07a3a";
-    } else if (v.type === "iron") {
-      body = "#7a7a8a"; accent = "#c0a090";
-    }
+    drawVein(v);
 
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.roundRect(v.x - 18, v.y - 14, 36, 28, 6);
-    ctx.fill();
-
-    ctx.fillStyle = accent;
-    ctx.globalAlpha = alpha * 0.5;
-    ctx.beginPath();
-    ctx.roundRect(v.x - 12, v.y - 10, 14, 10, 3);
-    ctx.fill();
-    ctx.globalAlpha = alpha;
-
-    emoji(v.emoji, v.x, v.y, 22);
-
+    // полоска прогресса
     if (v.started && !v.done) {
       ctx.fillStyle = "#000";
-      ctx.fillRect(v.x - 20, v.y - 28, 40, 6);
+      ctx.fillRect(v.x - 22, v.y - 32, 44, 7);
       ctx.fillStyle = "#f5c542";
-      ctx.fillRect(v.x - 20, v.y - 28, 40 * v.progress, 6);
+      ctx.fillRect(v.x - 22, v.y - 32, 44 * v.progress, 7);
     }
 
+    // название
     if (!v.started) {
-      ctx.fillStyle = "#bbb";
-      ctx.font = "10px sans-serif";
+      ctx.fillStyle = "#ddd";
+      ctx.font = "11px sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(v.name.split(" ")[0], v.x, v.y + 24);
+      ctx.fillText(v.name.split(" ")[0], v.x, v.y + 28);
     }
 
     ctx.globalAlpha = 1;
   });
+
+  // лёгкий туман на закрытых зонах (просто затемнение низа, если мало открыто)
+  const unlockedCount = mine.veins.filter(v => v.unlocked).length;
+  if (unlockedCount < 12) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 400, mine.width, mine.height - 400);
+  }
 
   drawPlayer();
   ctx.restore();
@@ -355,7 +355,7 @@ function nearestVein() {
   if (!mine) return null;
   let best = null, bd = 55;
   for (const v of mine.veins) {
-    if (v.done && v.collected) continue;
+    if (!v.unlocked || v.collected) continue;
     const d = Math.hypot(v.x - me.x, v.y - me.y);
     if (d < bd) { bd = d; best = v; }
   }
@@ -394,7 +394,7 @@ function updateActions() {
   } else if (scene === "mine") {
     const v = nearestVein();
     if (!v) {
-      $("sceneInfo").textContent = "Все жилы выкопаны. Можно выйти";
+      $("sceneInfo").textContent = "Рядом нет открытых жил. Иди дальше или копай другие";
       bMineDig.textContent = "⛏️ Копать";
       bMineDig.disabled = true;
     } else if (v.done) {
@@ -558,6 +558,9 @@ bMineDig.onclick = async () => {
       const res = await call("/mine/collect", {init_data: tg.initData, vein_id: v.id});
       Object.assign(v, res.vein);
       v.collected = true;
+      // обновить все жилы (могли открыться новые)
+      const state = await call("/mine/state", {init_data: tg.initData});
+      mine.veins = state.veins;
       apply(res);
       closeDig();
     } catch (e) {
@@ -684,7 +687,7 @@ async function finishFish() {
   lake.phase = "idle";
 }
 
-/* ---------- окно копания шахты ---------- */
+/* ---------- окно копания ---------- */
 let digVein = null;
 let digTimer = null;
 let boostTimer = null;
@@ -734,9 +737,7 @@ function updateDigBar() {
   if (!digVein) return;
   const pct = Math.min(100, (1 - digVein.left / digVein.total) * 100);
   $("digFill").style.width = pct + "%";
-  $("digTime").textContent = digVein.done
-    ? "Готово!"
-    : Math.ceil(digVein.left) + " с";
+  $("digTime").textContent = digVein.done ? "Готово!" : Math.ceil(digVein.left) + " с";
 }
 
 function scheduleBoost() {
@@ -776,8 +777,8 @@ $("digCollect").onclick = async () => {
     const res = await call("/mine/collect", {init_data: tg.initData, vein_id: digVein.id});
     Object.assign(digVein, res.vein);
     digVein.collected = true;
-    const mv = mine.veins.find(x => x.id === digVein.id);
-    if (mv) { Object.assign(mv, res.vein); mv.collected = true; }
+    const state = await call("/mine/state", {init_data: tg.initData});
+    mine.veins = state.veins;
     apply(res);
     closeDig();
   } catch (e) {
@@ -790,4 +791,4 @@ function closeDig() {
   clearTimeout(boostTimer);
   $("digRoot").classList.add("hidden");
   digVein = null;
-                        }
+}
