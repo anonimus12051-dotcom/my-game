@@ -23,7 +23,6 @@ router = APIRouter()
 
 PLACE_WEIGHTS = {"forest": 40, "lake": 18, "clearing": 30}
 
-# секунд между ударами топором
 AXE_GAP = {
     "wooden_axe": 10,
     "stone_axe": 9,
@@ -69,8 +68,8 @@ NAMES = {
 
 # ---------- шахта ----------
 
-MINE_W = 720
-MINE_H = 900
+MINE_W = 800
+MINE_H = 1200
 
 PICKAXE_BOOST = {
     "wooden_pickaxe": 0.08,
@@ -89,10 +88,10 @@ PICKAXE_SPEED = {
 }
 
 VEIN_TYPES = {
-    "stone":  {"name": "Камень",        "emoji": "🪨", "base": 50, "loot": ("stone", 1, 5)},
-    "coal":   {"name": "Уголь",         "emoji": "⬛", "base": 60, "loot": ("coal", 1, 4)},
-    "copper": {"name": "Медная руда",   "emoji": "🟠", "base": 70, "loot": ("copper_ore", 1, 3)},
-    "iron":   {"name": "Железная руда", "emoji": "⚙️", "base": 80, "loot": ("iron_ore", 1, 3)},
+    "stone":  {"name": "Камень",        "emoji": "🪨", "base": 45, "loot": ("stone", 1, 5)},
+    "coal":   {"name": "Уголь",         "emoji": "⬛", "base": 55, "loot": ("coal", 1, 4)},
+    "copper": {"name": "Медная руда",   "emoji": "🟠", "base": 65, "loot": ("copper_ore", 1, 3)},
+    "iron":   {"name": "Железная руда", "emoji": "⚙️", "base": 75, "loot": ("iron_ore", 1, 3)},
 }
 
 class VeinRequest(BaseModel):
@@ -110,26 +109,39 @@ def best_pickaxe(tid):
         .data
     )
     if not rows:
-        return None, None
-    # лучшая по скорости (меньший коэффициент)
+        return None, None, None
     best = min(rows, key=lambda r: PICKAXE_SPEED.get(r["item_id"], 1.0))
     pid = best["item_id"]
     return pid, PICKAXE_SPEED[pid], PICKAXE_BOOST[pid]
 
 
 def make_veins():
-    types = ["stone", "stone", "stone", "coal", "coal", "coal",
-             "copper", "copper", "copper", "iron", "iron", "iron"]
+    # больше камня сверху, лучше руда глубже
+    types = (
+        ["stone"] * 10 +
+        ["coal"] * 8 +
+        ["copper"] * 7 +
+        ["iron"] * 5
+    )
     random.shuffle(types)
+
     veins = []
     tries = 0
-    while len(veins) < 12 and tries < 800:
+    while len(veins) < 30 and tries < 2000:
         tries += 1
-        x = random.randint(50, MINE_W - 50)
-        y = random.randint(160, MINE_H - 60)  # сверху место под выход и лифт
-        if all((x - v["x"]) ** 2 + (y - v["y"]) ** 2 > 85 ** 2 for v in veins):
+        x = random.randint(60, MINE_W - 60)
+        y = random.randint(180, MINE_H - 80)
+
+        if all((x - v["x"]) ** 2 + (y - v["y"]) ** 2 > 70 ** 2 for v in veins):
             t = types[len(veins)]
             info = VEIN_TYPES[t]
+            # сверху проще, глубже сложнее
+            depth_mult = 1.0 + (y / MINE_H) * 0.4
+            total = round(info["base"] * depth_mult, 1)
+
+            # сначала открыты только ближние к входу
+            unlocked = y < 320
+
             veins.append({
                 "id": len(veins),
                 "type": t,
@@ -137,17 +149,32 @@ def make_veins():
                 "y": y,
                 "emoji": info["emoji"],
                 "name": info["name"],
-                "total": float(info["base"]),
-                "left": float(info["base"]),
+                "total": total,
+                "left": total,
                 "started": False,
                 "start_at": 0.0,
                 "done": False,
+                "collected": False,
+                "unlocked": unlocked,
             })
     return veins
 
 
+def unlock_nearby(data, collected_vein):
+    """Открывает ближайшие закрытые жилы после добычи."""
+    unlocked_count = 0
+    for v in data["veins"]:
+        if v["unlocked"] or v["collected"]:
+            continue
+        dist = ((v["x"] - collected_vein["x"]) ** 2 + (v["y"] - collected_vein["y"]) ** 2) ** 0.5
+        if dist < 180:
+            v["unlocked"] = True
+            unlocked_count += 1
+            if unlocked_count >= 3:
+                break
+
+
 def advance_mine(data, now):
-    """Считает прогресс AFK-копания."""
     for v in data["veins"]:
         if v["started"] and not v["done"] and v["start_at"] > 0:
             passed = now - v["start_at"]
@@ -172,6 +199,8 @@ def vein_view(v, now):
         "left": round(left, 1),
         "started": v["started"],
         "done": v["done"] or left <= 0,
+        "collected": v.get("collected", False),
+        "unlocked": v.get("unlocked", False),
         "progress": 0 if v["total"] <= 0 else round(1 - left / v["total"], 3),
     }
 
@@ -183,7 +212,7 @@ def mine_payload(data):
         "place": "mine",
         "width": MINE_W,
         "height": MINE_H,
-        "start": {"x": MINE_W // 2, "y": 90},
+        "start": {"x": MINE_W // 2, "y": 100},
         "veins": [vein_view(v, now) for v in data["veins"]],
     }
 
@@ -201,11 +230,9 @@ def best_axe_gap(tid):
         .execute()
         .data
     )
-    coaps = [AXE_GAP[r["item_id"]] for r in rows]
+    gaps = [AXE_GAP[r["item_id"]] for r in rows]
     return min(gaps) if gaps else None
 
-
-# ---------- лес ----------
 
 def make_trees():
     trees = []
@@ -346,8 +373,6 @@ def forest_dig(req: InitRequest):
     }
 
 
-# ---------- озеро ----------
-
 @router.post("/fish/start")
 @safe
 def fish_start(req: InitRequest):
@@ -445,20 +470,17 @@ def fish_finish(req: AnswerRequest):
 def mine_enter(req: InitRequest):
     tid = user_id(req.init_data)
 
-    # уже в шахте?
     try:
         data, ver = load_session(tid, "mine")
         return mine_payload(data)
     except HTTPException:
         pass
 
-    # нужна кирка
     pid, speed, boost = best_pickaxe(tid)
     if pid is None:
         raise HTTPException(400, "Нужна кирка. Купи её у торговца")
 
     veins = make_veins()
-    # применяем скорость кирки к базовому времени
     for v in veins:
         v["total"] = round(v["total"] * speed, 1)
         v["left"] = v["total"]
@@ -475,7 +497,6 @@ def mine_state(req: InitRequest):
     data, ver = load_session(tid, "mine")
     now = time.time()
     advance_mine(data, now)
-    # сохраняем прогресс (чтобы AFK работал между запросами)
     commit_session(tid, data, ver)
     return mine_payload(data)
 
@@ -487,11 +508,10 @@ def mine_start(req: VeinRequest):
     data, ver = load_session(tid, "mine")
 
     v = next((x for x in data["veins"] if x["id"] == req.vein_id), None)
-    if v is None or v["done"]:
-        raise HTTPException(404, "Эта жила уже выкопана")
+    if v is None or v["done"] or not v.get("unlocked"):
+        raise HTTPException(404, "Эта жила ещё закрыта или уже выкопана")
 
     if v["started"]:
-        # уже копается — просто вернуть состояние
         return {"vein": vein_view(v, time.time()), "message": "Уже копается"}
 
     now = time.time()
@@ -518,7 +538,6 @@ def mine_boost(req: VeinRequest):
         raise HTTPException(400, "Нельзя ускорить")
 
     now = time.time()
-    # актуализируем left
     passed = now - v["start_at"]
     v["left"] = max(0.0, v["total"] - passed)
 
@@ -530,7 +549,6 @@ def mine_boost(req: VeinRequest):
     boost = data.get("boost", 0.10)
     reduce = v["total"] * boost
     v["left"] = max(0.0, v["left"] - reduce)
-    # сдвигаем start_at так, чтобы left остался правильным
     v["start_at"] = now - (v["total"] - v["left"])
 
     if v["left"] <= 0:
@@ -572,6 +590,10 @@ def mine_collect(req: VeinRequest):
     check_space(tid, loot)
     v["collected"] = True
     v["done"] = True
+
+    # открываем соседние жилы
+    unlock_nearby(data, v)
+
     commit_session(tid, data, ver)
     add_items(tid, loot)
 
@@ -582,8 +604,6 @@ def mine_collect(req: VeinRequest):
         "player": build_player(tid),
     }
 
-
-# ---------- RTP ----------
 
 @router.post("/rtp/roll")
 @safe
