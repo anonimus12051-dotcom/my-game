@@ -11,7 +11,7 @@ const ARROWS = {left: "⬅️", right: "➡️", up: "⬆️", down: "⬇️"};
 
 const me = {x: 180, y: 320, tx: null, ty: null, pending: null};
 const cam = {x: 0, y: 0};
-let scene = "village";            // village | forest | lake | mine
+let scene = "village";
 let forest = null;
 let mine = null;
 const lake = {phase: "idle", waitUntil: 0};
@@ -36,7 +36,6 @@ function worldH() {
   return H;
 }
 
-/* ---------- движение и ввод ---------- */
 function openPlace(id) {
   if (id === "mine") {
     enterMine();
@@ -69,7 +68,6 @@ canvas.addEventListener("pointerdown", e => {
   go(x, y, null);
 });
 
-/* ---------- рисование ---------- */
 function emoji(txt, x, y, size) {
   ctx.font = size + "px serif";
   ctx.textAlign = "center";
@@ -186,60 +184,117 @@ function drawLake() {
 }
 
 function drawMine() {
-  // тёмный фон пещеры
-  ctx.fillStyle = "#1a1a22";
+  ctx.fillStyle = "#14141c";
   ctx.fillRect(0, 0, W, H);
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
 
-  // стены
-  ctx.fillStyle = "#2a2a35";
+  ctx.fillStyle = "#1e1e28";
   ctx.fillRect(0, 0, mine.width, mine.height);
 
-  // пол
-  ctx.fillStyle = "#22222c";
-  for (let gx = 0; gx < mine.width; gx += 60) {
-    for (let gy = 0; gy < mine.height; gy += 60) {
-      if ((gx / 60 + gy / 60) % 2 === 0) ctx.fillRect(gx, gy, 60, 60);
+  ctx.fillStyle = "#252530";
+  for (let gx = 0; gx < mine.width; gx += 48) {
+    for (let gy = 0; gy < mine.height; gy += 48) {
+      if ((gx / 48 + gy / 48) % 2 === 0) {
+        ctx.fillRect(gx, gy, 48, 48);
+      }
     }
   }
 
-  // выход (верх центр)
-  ctx.fillStyle = "#3a2f26";
-  ctx.fillRect(mine.width / 2 - 50, 20, 100, 50);
-  ctx.fillStyle = "#1a1a22";
+  ctx.strokeStyle = "#18181f";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 18; i++) {
+    const x = (i * 97) % mine.width;
+    const y = (i * 53) % mine.height;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + 30 + (i % 5) * 8, y + 10 + (i % 3) * 6);
+    ctx.stroke();
+  }
+
+  const ex = mine.width / 2;
+
+  // Выход
+  ctx.fillStyle = "#2a221c";
+  ctx.fillRect(ex - 55, 10, 110, 70);
+  ctx.fillStyle = "#1a1410";
   ctx.beginPath();
-  ctx.ellipse(mine.width / 2, 70, 40, 18, 0, 0, Math.PI * 2);
+  ctx.ellipse(ex, 80, 48, 22, 0, 0, Math.PI * 2);
   ctx.fill();
-  emoji("🚪", mine.width / 2, 45, 28);
+  ctx.fillStyle = "#0d0d12";
+  ctx.fillRect(ex - 22, 35, 44, 45);
+  ctx.fillStyle = "#3a2f26";
+  ctx.fillRect(ex - 18, 40, 36, 38);
+  emoji("🚪", ex, 55, 26);
   ctx.fillStyle = "#aaa";
-  ctx.font = "bold 12px sans-serif";
+  ctx.font = "bold 13px sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("Выход", mine.width / 2, 95);
+  ctx.fillText("Выход", ex, 105);
 
-  // лифт (закрыт)
-  ctx.fillStyle = "#333";
-  ctx.fillRect(mine.width / 2 + 70, 25, 55, 55);
-  ctx.fillStyle = "#555";
-  ctx.fillRect(mine.width / 2 + 78, 33, 39, 39);
-  emoji("🛗", mine.width / 2 + 97, 52, 22);
+  // Лифт
+  ctx.fillStyle = "#2a2a35";
+  ctx.fillRect(ex + 70, 18, 70, 75);
+  ctx.fillStyle = "#1a1a22";
+  ctx.fillRect(ex + 78, 26, 54, 54);
+  ctx.strokeStyle = "#444";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(ex + 78, 26 + i * 18);
+    ctx.lineTo(ex + 132, 26 + i * 18);
+    ctx.stroke();
+  }
+  emoji("🛗", ex + 105, 50, 24);
   ctx.fillStyle = "#888";
-  ctx.font = "10px sans-serif";
-  ctx.fillText("Скоро", mine.width / 2 + 97, 90);
+  ctx.font = "11px sans-serif";
+  ctx.fillText("Лифт", ex + 105, 95);
+  ctx.fillText("скоро", ex + 105, 108);
 
-  // жилы
+  // Жилы
   mine.veins.forEach(v => {
     if (v.done && v.collected) return;
-    const alpha = v.done ? 0.5 : 1;
+
+    const alpha = v.done ? 0.45 : 1;
     ctx.globalAlpha = alpha;
-    emoji(v.emoji, v.x, v.y, 32);
-    if (v.started && !v.done) {
-      // мини-полоска
-      ctx.fillStyle = "#000";
-      ctx.fillRect(v.x - 18, v.y - 28, 36, 5);
-      ctx.fillStyle = "#f5c542";
-      ctx.fillRect(v.x - 18, v.y - 28, 36 * v.progress, 5);
+
+    let body = "#6a6a6a";
+    let accent = "#888";
+    if (v.type === "coal") {
+      body = "#222"; accent = "#444";
+    } else if (v.type === "copper") {
+      body = "#b35a2a"; accent = "#e07a3a";
+    } else if (v.type === "iron") {
+      body = "#7a7a8a"; accent = "#c0a090";
     }
+
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.roundRect(v.x - 18, v.y - 14, 36, 28, 6);
+    ctx.fill();
+
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.beginPath();
+    ctx.roundRect(v.x - 12, v.y - 10, 14, 10, 3);
+    ctx.fill();
+    ctx.globalAlpha = alpha;
+
+    emoji(v.emoji, v.x, v.y, 22);
+
+    if (v.started && !v.done) {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(v.x - 20, v.y - 28, 40, 6);
+      ctx.fillStyle = "#f5c542";
+      ctx.fillRect(v.x - 20, v.y - 28, 40 * v.progress, 6);
+    }
+
+    if (!v.started) {
+      ctx.fillStyle = "#bbb";
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(v.name.split(" ")[0], v.x, v.y + 24);
+    }
+
     ctx.globalAlpha = 1;
   });
 
@@ -281,7 +336,6 @@ function frame(t) {
 }
 requestAnimationFrame(frame);
 
-/* ---------- панель действий ---------- */
 const bChop = $("bChop");
 const bDig = $("bDig");
 const bCast = $("bCast");
@@ -371,7 +425,6 @@ function updateActions() {
 }
 setInterval(updateActions, 250);
 
-/* ---------- RTP: вход, возврат, выход ---------- */
 function enterScene(p) {
   me.tx = null;
   me.pending = null;
@@ -462,7 +515,6 @@ $("bLeave").onclick = async () => {
   updateActions();
 };
 
-/* ---------- лес ---------- */
 bChop.onclick = async () => {
   if (busy) return;
   const t = nearestTree();
@@ -497,13 +549,11 @@ bDig.onclick = async () => {
   busy = false;
 };
 
-/* ---------- шахта ---------- */
 bMineDig.onclick = async () => {
   const v = nearestVein();
   if (!v) return;
 
   if (v.done) {
-    // забрать
     try {
       const res = await call("/mine/collect", {init_data: tg.initData, vein_id: v.id});
       Object.assign(v, res.vein);
@@ -516,11 +566,9 @@ bMineDig.onclick = async () => {
     return;
   }
 
-  // открыть окно копания
   openDig(v);
 };
 
-/* ---------- озеро ---------- */
 let biteTimer = null;
 let biteTries = 0;
 let fishTimer = null;
@@ -648,7 +696,6 @@ function openDig(v) {
   $("digBoostBtn").classList.add("hidden");
   updateDigBar();
 
-  // если ещё не начато — стартуем
   if (!v.started) {
     call("/mine/start", {init_data: tg.initData, vein_id: v.id})
       .then(res => {
@@ -669,7 +716,6 @@ function openDig(v) {
       const updated = res.veins.find(x => x.id === v.id);
       if (updated) {
         Object.assign(v, updated);
-        // обновить и в mine.veins
         const mv = mine.veins.find(x => x.id === v.id);
         if (mv) Object.assign(mv, updated);
         updateDigBar();
@@ -696,10 +742,9 @@ function updateDigBar() {
 function scheduleBoost() {
   clearTimeout(boostTimer);
   if (!digVein || digVein.done) return;
-  const delay = 7000 + Math.random() * 8000; // 7–15 сек
+  const delay = 7000 + Math.random() * 8000;
   boostTimer = setTimeout(() => {
     if (digVein && !digVein.done) {
-      // случайная позиция кнопки
       const btn = $("digBoostBtn");
       btn.classList.remove("hidden");
       btn.style.left = (20 + Math.random() * 60) + "%";
@@ -745,5 +790,4 @@ function closeDig() {
   clearTimeout(boostTimer);
   $("digRoot").classList.add("hidden");
   digVein = null;
-}
-  
+                        }
